@@ -1,5 +1,5 @@
 # Dependencies
-node_modules
+**/node_modules
 npm-debug.log*
 pnpm-debug.log*
 
@@ -96,8 +96,13 @@ Thumbs.db
 .gitignore
 
 # Docker
-Dockerfile
+Dockerfile*
 .dockerignore
+docker-compose*.yml
+.env*
+
+# Build tools
+Makefile
 
 # README and docs
 README.md
