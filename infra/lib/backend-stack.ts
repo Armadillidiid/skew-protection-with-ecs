@@ -3,6 +3,7 @@ import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import * as ecr from "aws-cdk-lib/aws-ecr";
+import * as codedeploy from "aws-cdk-lib/aws-codedeploy";
 import { Construct } from "constructs";
 
 export interface BackendStackProps extends cdk.StackProps {}
@@ -12,6 +13,9 @@ export class BackendStack extends cdk.Stack {
   public readonly loadBalancer: elbv2.ApplicationLoadBalancer;
   public readonly ecrRepository: ecr.Repository;
   public readonly ecsService: ecs.FargateService;
+  public readonly codeDeployApplication: codedeploy.EcsApplication;
+  public readonly blueTargetGroup: elbv2.ApplicationTargetGroup;
+  public readonly greenTargetGroup: elbv2.ApplicationTargetGroup;
 
   constructor(scope: Construct, id: string, props: BackendStackProps = {}) {
     super(scope, id, props);
@@ -95,32 +99,64 @@ export class BackendStack extends cdk.Stack {
         subnetType: ec2.SubnetType.PUBLIC,
         availabilityZones: this.vpc.availabilityZones.slice(0, 2), // Limit to 2 AZs for cost control
       },
+      deploymentStrategy: ecs.DeploymentStrategy.BLUE_GREEN,
+      deploymentController: { type: ecs.DeploymentControllerType.CODE_DEPLOY },
     });
 
-    // Target Group
-    const targetGroup = new elbv2.ApplicationTargetGroup(
+    const targetGroupProps = {
+      vpc: this.vpc,
+      port: 3000,
+      protocol: elbv2.ApplicationProtocol.HTTP,
+      targetType: elbv2.TargetType.IP,
+      healthCheck: {
+        enabled: true,
+        path: "/health",
+      },
+    };
+
+    this.blueTargetGroup = new elbv2.ApplicationTargetGroup(
       this,
-      "ApiTargetGroup",
+      "BlueTargetGroup",
+      targetGroupProps,
+    );
+
+    this.greenTargetGroup = new elbv2.ApplicationTargetGroup(
+      this,
+      "GreenTargetGroup",
+      targetGroupProps,
+    );
+
+    this.ecsService.attachToApplicationTargetGroup(this.blueTargetGroup);
+
+    const productionListener = this.loadBalancer.addListener(
+      "ProductionListener",
       {
-        vpc: this.vpc,
-        port: 3000,
+        port: 80,
         protocol: elbv2.ApplicationProtocol.HTTP,
-        targetType: elbv2.TargetType.IP,
-        healthCheck: {
-          enabled: true,
-          path: "/health",
-        },
+        defaultTargetGroups: [this.blueTargetGroup],
       },
     );
 
-    // Attach ECS Service to Target Group
-    this.ecsService.attachToApplicationTargetGroup(targetGroup);
+    // CodeDeploy Application
+    this.codeDeployApplication = new codedeploy.EcsApplication(
+      this,
+      "CodeDeployApplication",
+    );
 
-    // ALB Listener
-    this.loadBalancer.addListener("ApiListener", {
-      port: 80,
-      protocol: elbv2.ApplicationProtocol.HTTP,
-      defaultTargetGroups: [targetGroup],
+    // CodeDeploy Deployment Group
+    new codedeploy.EcsDeploymentGroup(this, "DeploymentGroup", {
+      application: this.codeDeployApplication,
+      deploymentGroupName: "skew-protection-deployment-group",
+      service: this.ecsService,
+      blueGreenDeploymentConfig: {
+        blueTargetGroup: this.blueTargetGroup,
+        greenTargetGroup: this.greenTargetGroup,
+        listener: productionListener,
+        deploymentApprovalWaitTime: cdk.Duration.minutes(5),
+        terminationWaitTime: cdk.Duration.minutes(5),
+      },
+      deploymentConfig:
+        codedeploy.EcsDeploymentConfig.CANARY_10PERCENT_5MINUTES,
     });
 
     // Outputs
