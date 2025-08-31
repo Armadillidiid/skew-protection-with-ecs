@@ -1,7 +1,7 @@
 import * as cdk from "aws-cdk-lib";
 import { Construct } from "constructs";
-import { BackendStack } from "./backend-stack.js";
-import { FrontendStack } from "./frontend-stack.js";
+import { BackendStack } from "./backend-stack.ts";
+import { FrontendStack } from "./frontend-stack.ts";
 
 export class InfraStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
