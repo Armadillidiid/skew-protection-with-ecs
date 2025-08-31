@@ -1,8 +1,9 @@
 packages:
   - apps/*
+  - infra
 onlyBuiltDependencies:
-  - '@swc/core'
+  - "@swc/core"
   - esbuild
 publicHoistPattern:
-  - '*eslint*'
-  - '*prettier*'
+  - "*eslint*"
+  - "*prettier*"
