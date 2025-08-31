@@ -1,7 +1,10 @@
 {
   "name": "skew-protection-with-ecs",
+  "type": "module",
+  "private": true,
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "web": "pnpm --filter web",
+    "api": "pnpm --filter api"
   },
   "author": "",
   "license": "ISC",
