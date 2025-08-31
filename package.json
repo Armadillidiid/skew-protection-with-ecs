@@ -4,7 +4,13 @@
   "private": true,
   "scripts": {
     "web": "pnpm --filter web",
-    "api": "pnpm --filter api"
+    "api": "pnpm --filter api",
+    "deploy": "./scripts/deploy.sh",
+    "deploy:backend": "pnpm --filter infra exec cdk deploy InfraStack/Backend",
+    "deploy:frontend": "pnpm --filter infra exec cdk deploy InfraStack/Frontend",
+    "infra:destroy": "pnpm --filter infra exec cdk destroy --all",
+    "infra:diff": "pnpm --filter infra exec cdk diff",
+    "infra:synth": "pnpm --filter infra exec cdk synth"
   },
   "author": "",
   "license": "ISC",
