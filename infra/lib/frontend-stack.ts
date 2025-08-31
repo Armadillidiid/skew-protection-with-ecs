@@ -10,9 +10,7 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-export interface FrontendStackProps extends cdk.StackProps {
-  apiDomain?: string;
-}
+export interface FrontendStackProps extends cdk.StackProps {}
 
 export class FrontendStack extends cdk.Stack {
   public readonly s3Bucket: s3.Bucket;

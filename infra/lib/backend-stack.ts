@@ -146,7 +146,6 @@ export class BackendStack extends cdk.Stack {
     // CodeDeploy Deployment Group
     new codedeploy.EcsDeploymentGroup(this, "DeploymentGroup", {
       application: this.codeDeployApplication,
-      deploymentGroupName: "skew-protection-deployment-group",
       service: this.ecsService,
       blueGreenDeploymentConfig: {
         blueTargetGroup: this.blueTargetGroup,
