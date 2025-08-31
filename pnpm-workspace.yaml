@@ -1,6 +1,8 @@
 packages:
-  - "apps/*"
-
+  - apps/*
+onlyBuiltDependencies:
+  - '@swc/core'
+  - esbuild
 publicHoistPattern:
-  - "*eslint*"
-  - "*prettier*"
+  - '*eslint*'
+  - '*prettier*'
