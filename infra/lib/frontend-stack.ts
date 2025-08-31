@@ -23,7 +23,6 @@ export class FrontendStack extends cdk.Stack {
 
     // S3 Bucket for hosting static website
     this.s3Bucket = new s3.Bucket(this, "WebsiteBucket", {
-      bucketName: `skew-protection-frontend-${this.account}-${this.region}`,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
       publicReadAccess: false,

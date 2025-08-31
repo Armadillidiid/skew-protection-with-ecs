@@ -24,7 +24,7 @@ The infrastructure is split into two separate CDK stacks for better separation o
 
 ### Backend Stack (`InfraStack-Backend`)
 
-- **VPC** with public and private subnets
+- **Default VPC** for simplified networking
 - **ECR Repository** for container images
 - **ECS Fargate Cluster** with auto-scaling
 - **Application Load Balancer** for high availability
