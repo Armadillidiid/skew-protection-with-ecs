@@ -2,7 +2,12 @@
   "name": "@repo/api",
   "type": "module",
   "scripts": {
+    "start": "node index.ts",
+    "dev": "node --watch index.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "engines": {
+    "node": ">=22"
   },
   "devDependencies": {
     "@types/node": "^24.3.0"
