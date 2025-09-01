@@ -57,10 +57,13 @@ jobs:
       - name: Comment CDK diff on PR
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
+        env:
+          DIFF_OUTPUT: ${{ steps.cdk-diff.outputs.diff-output }}
+          HAS_CHANGES: ${{ steps.cdk-diff.outputs.has-changes }}
         with:
           script: |
-            const diffOutput = '${{ steps.cdk-diff.outputs.diff-output }}';
-            const hasChanges = '${{ steps.cdk-diff.outputs.has-changes }}' === 'true';
+            const diffOutput = process.env.DIFF_OUTPUT;
+            const hasChanges = process.env.HAS_CHANGES === 'true';
 
             let body;
             if (hasChanges) {
