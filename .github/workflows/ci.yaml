@@ -23,16 +23,17 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
           role-duration-seconds: 900
 
+      - name: Build all packages
+        run: pnpm build
+
       - name: CDK Synth
-        working-directory: infra
-        run: pnpm exec cdk synth --all
+        run: pnpm infra:synth
 
       - name: CDK Diff (if not first deployment)
         id: cdk-diff
-        working-directory: infra
         run: |
           set +e
-          pnpm exec cdk diff --all > cdk-diff.txt 2>&1
+          pnpm infra:diff > cdk-diff.txt 2>&1
           diff_exit_code=$?
           set -e
 
@@ -62,8 +63,16 @@ jobs:
             const hasChanges = '${{ steps.cdk-diff.outputs.has-changes }}' === 'true';
 
             const body = hasChanges 
-              ? `## 🔄 CDK Diff Results\n\nThe following infrastructure changes will be applied:\n\n\`\`\`diff\n${diffOutput}\n\`\`\``
-              : `## ✅ CDK Diff Results\n\nNo infrastructure changes detected.`;
+              ? `## 🔄 CDK Diff Results
+
+            The following infrastructure changes will be applied:
+
+            \`\`\`diff
+            ${diffOutput}
+            \`\`\``
+              : `## ✅ CDK Diff Results
+
+            No infrastructure changes detected.`;
 
             // Find existing comment
             const comments = await github.rest.issues.listComments({

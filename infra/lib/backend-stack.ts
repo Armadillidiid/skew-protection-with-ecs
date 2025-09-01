@@ -101,6 +101,9 @@ export class BackendStack extends cdk.Stack {
       },
       deploymentStrategy: ecs.DeploymentStrategy.BLUE_GREEN,
       deploymentController: { type: ecs.DeploymentControllerType.CODE_DEPLOY },
+      minHealthyPercent: 100,
+      maxHealthyPercent: 200,
+      desiredCount: 1,
     });
 
     const targetGroupProps = {
