@@ -74,19 +74,21 @@ export class BackendStack extends cdk.Stack {
     );
 
     // Container Definition
-    const container = taskDefinition.addContainer("ApiContainer", {
+    const container = taskDefinition.addContainer("node-api", {
       image: ecs.ContainerImage.fromEcrRepository(this.ecrRepository),
+      portMappings: [
+        {
+          name: "api",
+          containerPort: 3000,
+          appProtocol: ecs.AppProtocol.http,
+        },
+      ],
       healthCheck: {
         command: [
           "CMD-SHELL",
           "curl -f http://localhost:3000/health || exit 1",
         ],
       },
-    });
-
-    container.addPortMappings({
-      containerPort: 3000,
-      protocol: ecs.Protocol.TCP,
     });
 
     // ECS Service
@@ -115,7 +117,7 @@ export class BackendStack extends cdk.Stack {
         enabled: true,
         path: "/health",
       },
-    };
+    } satisfies cdk.aws_elasticloadbalancingv2.ApplicationTargetGroupProps;
 
     this.blueTargetGroup = new elbv2.ApplicationTargetGroup(
       this,
@@ -129,12 +131,48 @@ export class BackendStack extends cdk.Stack {
       targetGroupProps,
     );
 
-    this.ecsService.attachToApplicationTargetGroup(this.blueTargetGroup);
-    this.loadBalancer.addListener("ProductionListener", {
-      port: 80,
-      protocol: elbv2.ApplicationProtocol.HTTP,
-      defaultTargetGroups: [this.blueTargetGroup],
+    const productionListener = this.loadBalancer.addListener(
+      "ProductionListener",
+      {
+        port: 80,
+        defaultAction: elbv2.ListenerAction.fixedResponse(404),
+      },
+    );
+
+    const prodListenerRule = new elbv2.ApplicationListenerRule(
+      this,
+      "ProductionListenerRule",
+      {
+        listener: productionListener,
+        priority: 1,
+        conditions: [elbv2.ListenerCondition.pathPatterns(["/*"])],
+        action: elbv2.ListenerAction.weightedForward([
+          {
+            targetGroup: this.blueTargetGroup,
+            weight: 100,
+          },
+          {
+            targetGroup: this.greenTargetGroup,
+            weight: 0,
+          },
+        ]),
+      },
+    );
+
+    const target = this.ecsService.loadBalancerTarget({
+      containerName: container.containerName,
+      containerPort: 3000,
+      protocol: ecs.Protocol.TCP,
+      alternateTarget: new ecs.AlternateTarget("LBAlternateOptions", {
+        alternateTargetGroup: this.greenTargetGroup,
+        productionListener:
+          ecs.ListenerRuleConfiguration.applicationListenerRule(
+            prodListenerRule,
+          ),
+      }),
     });
+
+    target.attachToApplicationTargetGroup(this.blueTargetGroup);
 
     // Outputs
     new cdk.CfnOutput(this, "LoadBalancerDNS", {
