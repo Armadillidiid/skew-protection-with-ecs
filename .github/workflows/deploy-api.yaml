@@ -1,0 +1,279 @@
+name: Deploy API
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "Deployment environment"
+        required: false
+        type: string
+        default: "production"
+      aws-region:
+        description: "AWS region"
+        required: false
+        type: string
+        default: "us-east-1"
+      stack-name:
+        description: "CloudFormation stack name for backend"
+        required: false
+        type: string
+        default: "SkewProtectionStack/Backend"
+      deployment-strategy:
+        description: "Deployment strategy: rolling or blue-green"
+        required: false
+        type: string
+        default: "rolling"
+      image-tag:
+        description: "Docker image tag"
+        required: false
+        type: string
+        default: ${{ github.sha }}
+    secrets:
+      AWS_ROLE_ARN:
+        description: "AWS IAM role ARN for authentication"
+        required: true
+
+jobs:
+  deploy-api:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js and install dependencies
+        uses: ./.github/composite/pnpm-install
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ inputs.aws-region }}
+          role-duration-seconds: 1800
+
+      - name: Get deployment targets from CloudFormation
+        id: get-targets
+        run: |
+          # Get ECR repository URI
+          ECR_URI=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack-name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='ECRRepositoryURI'].OutputValue" \
+            --output text)
+
+          # Get ECS cluster name
+          CLUSTER_NAME=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack-name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='ECSClusterName'].OutputValue" \
+            --output text)
+
+          # Get ECS service name
+          SERVICE_NAME=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack-name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='ECSServiceName'].OutputValue" \
+            --output text)
+
+          if [ -z "$ECR_URI" ] || [ "$ECR_URI" = "None" ]; then
+            echo "❌ Could not retrieve ECR repository URI from stack ${{ inputs.stack-name }}"
+            exit 1
+          fi
+
+          if [ -z "$CLUSTER_NAME" ] || [ "$CLUSTER_NAME" = "None" ]; then
+            echo "❌ Could not retrieve ECS cluster name from stack ${{ inputs.stack-name }}"
+            exit 1
+          fi
+
+          if [ -z "$SERVICE_NAME" ] || [ "$SERVICE_NAME" = "None" ]; then
+            echo "❌ Could not retrieve ECS service name from stack ${{ inputs.stack-name }}"
+            exit 1
+          fi
+
+          echo "ecr-uri=${ECR_URI}" >> $GITHUB_OUTPUT
+          echo "cluster-name=${CLUSTER_NAME}" >> $GITHUB_OUTPUT
+          echo "service-name=${SERVICE_NAME}" >> $GITHUB_OUTPUT
+          echo "🏗️  ECR Repository: ${ECR_URI}"
+          echo "🔧 ECS Cluster: ${CLUSTER_NAME}"
+          echo "⚙️  ECS Service: ${SERVICE_NAME}"
+
+      - name: Login to Amazon ECR
+        run: |
+          aws ecr get-login-password --region ${{ inputs.aws-region }} | \
+            docker login --username AWS --password-stdin ${{ steps.get-targets.outputs.ecr-uri }}
+          echo "✅ Successfully logged in to ECR"
+
+      - name: Build and tag Docker image
+        run: |
+          cd apps/api
+          IMAGE_TAG="${{ inputs.image-tag }}"
+          FULL_IMAGE_URI="${{ steps.get-targets.outputs.ecr-uri }}:${IMAGE_TAG}"
+
+          echo "🐳 Building Docker image..."
+          docker build -t ${FULL_IMAGE_URI} .
+          docker tag ${FULL_IMAGE_URI} ${{ steps.get-targets.outputs.ecr-uri }}:latest
+
+          echo "image-uri=${FULL_IMAGE_URI}" >> $GITHUB_OUTPUT
+          echo "✅ Docker image built: ${FULL_IMAGE_URI}"
+
+      - name: Push Docker image to ECR
+        id: push-image
+        run: |
+          IMAGE_TAG="${{ inputs.image-tag }}"
+          FULL_IMAGE_URI="${{ steps.get-targets.outputs.ecr-uri }}:${IMAGE_TAG}"
+
+          echo "📤 Pushing Docker image to ECR..."
+          docker push ${FULL_IMAGE_URI}
+          docker push ${{ steps.get-targets.outputs.ecr-uri }}:latest
+
+          echo "✅ Docker image pushed successfully"
+          echo "image-uri=${FULL_IMAGE_URI}" >> $GITHUB_OUTPUT
+
+      - name: Get current task definition
+        id: get-task-def
+        run: |
+          # Get the current task definition
+          TASK_DEF_ARN=$(aws ecs describe-services \
+            --cluster ${{ steps.get-targets.outputs.cluster-name }} \
+            --services ${{ steps.get-targets.outputs.service-name }} \
+            --query 'services[0].taskDefinition' \
+            --output text)
+
+          echo "📋 Current task definition: ${TASK_DEF_ARN}"
+
+          # Download the current task definition
+          aws ecs describe-task-definition \
+            --task-definition ${TASK_DEF_ARN} \
+            --query 'taskDefinition' > task-definition.json
+
+          echo "✅ Task definition downloaded"
+
+      - name: Update task definition with new image
+        run: |
+          IMAGE_TAG="${{ inputs.image-tag }}"
+          NEW_IMAGE_URI="${{ steps.get-targets.outputs.ecr-uri }}:${IMAGE_TAG}"
+
+          echo "🔄 Updating task definition with new image: ${NEW_IMAGE_URI}"
+
+          # Update the image URI in the task definition
+          jq --arg IMAGE_URI "${NEW_IMAGE_URI}" \
+            '.containerDefinitions[0].image = $IMAGE_URI' \
+            task-definition.json > updated-task-definition.json
+
+          # Remove fields that are not needed for registration
+          jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .placementConstraints, .compatibilities, .registeredAt, .registeredBy)' \
+            updated-task-definition.json > final-task-definition.json
+
+          echo "✅ Task definition updated"
+
+      - name: Deploy with rolling update
+        if: ${{ inputs.deployment-strategy == 'rolling' }}
+        run: |
+          echo "🚀 Starting rolling deployment..."
+
+          # Register new task definition
+          NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://final-task-definition.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+
+          echo "📝 New task definition registered: ${NEW_TASK_DEF_ARN}"
+
+          # Update the service with the new task definition
+          aws ecs update-service \
+            --cluster ${{ steps.get-targets.outputs.cluster-name }} \
+            --service ${{ steps.get-targets.outputs.service-name }} \
+            --task-definition ${NEW_TASK_DEF_ARN} \
+            --force-new-deployment
+
+          echo "⏳ Waiting for service to reach stable state..."
+          aws ecs wait services-stable \
+            --cluster ${{ steps.get-targets.outputs.cluster-name }} \
+            --services ${{ steps.get-targets.outputs.service-name }}
+
+          echo "✅ Rolling deployment completed successfully!"
+
+      # - name: Deploy with blue-green strategy
+      #   if: ${{ inputs.deployment-strategy == 'blue-green' }}
+      #   run: |
+      #     echo "🔵🟢 Starting blue-green deployment..."
+      #     echo "📝 Note: This requires CodeDeploy to be configured for your ECS service"
+      #
+      #     # This would typically integrate with AWS CodeDeploy
+      #     # For now, we'll fall back to rolling deployment
+      #     echo "⚠️  Blue-green deployment requires additional CodeDeploy configuration"
+      #     echo "🔄 Falling back to rolling deployment..."
+      #
+      #     # Register new task definition
+      #     NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
+      #       --cli-input-json file://final-task-definition.json \
+      #       --query 'taskDefinition.taskDefinitionArn' \
+      #       --output text)
+      #
+      #     echo "📝 New task definition registered: ${NEW_TASK_DEF_ARN}"
+      #
+      #     # Update the service with the new task definition
+      #     aws ecs update-service \
+      #       --cluster ${{ steps.get-targets.outputs.cluster-name }} \
+      #       --service ${{ steps.get-targets.outputs.service-name }} \
+      #       --task-definition ${NEW_TASK_DEF_ARN} \
+      #       --force-new-deployment
+      #
+      #     echo "⏳ Waiting for service to reach stable state..."
+      #     aws ecs wait services-stable \
+      #       --cluster ${{ steps.get-targets.outputs.cluster-name }} \
+      #       --services ${{ steps.get-targets.outputs.service-name }}
+      #
+      #     echo "✅ Deployment completed successfully!"
+
+      - name: Verify deployment
+        run: |
+          echo "🔍 Verifying deployment..."
+
+          # Get service details
+          SERVICE_STATUS=$(aws ecs describe-services \
+            --cluster ${{ steps.get-targets.outputs.cluster-name }} \
+            --services ${{ steps.get-targets.outputs.service-name }} \
+            --query 'services[0].status' \
+            --output text)
+
+          RUNNING_COUNT=$(aws ecs describe-services \
+            --cluster ${{ steps.get-targets.outputs.cluster-name }} \
+            --services ${{ steps.get-targets.outputs.service-name }} \
+            --query 'services[0].runningCount' \
+            --output text)
+
+          DESIRED_COUNT=$(aws ecs describe-services \
+            --cluster ${{ steps.get-targets.outputs.cluster-name }} \
+            --services ${{ steps.get-targets.outputs.service-name }} \
+            --query 'services[0].desiredCount' \
+            --output text)
+
+          echo "📊 Service Status: ${SERVICE_STATUS}"
+          echo "🏃 Running Tasks: ${RUNNING_COUNT}/${DESIRED_COUNT}"
+
+          if [ "$SERVICE_STATUS" = "ACTIVE" ] && [ "$RUNNING_COUNT" = "$DESIRED_COUNT" ]; then
+            echo "✅ Deployment verification successful!"
+            
+            # Try to get the load balancer URL if available
+            LB_URL=$(aws cloudformation describe-stacks \
+              --stack-name ${{ inputs.stack-name }} \
+              --query "Stacks[0].Outputs[?OutputKey=='LoadBalancerURL'].OutputValue" \
+              --output text 2>/dev/null || echo "")
+            
+            if [ ! -z "$LB_URL" ] && [ "$LB_URL" != "None" ]; then
+              echo "🔗 API URL: ${LB_URL}"
+            fi
+          else
+            echo "❌ Deployment verification failed!"
+            exit 1
+          fi
+
+      - name: Cleanup
+        if: always()
+        run: |
+          # Clean up temporary files
+          rm -f task-definition.json updated-task-definition.json final-task-definition.json
+          echo "🧹 Cleanup completed"

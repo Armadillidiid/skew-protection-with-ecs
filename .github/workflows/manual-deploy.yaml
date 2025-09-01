@@ -1,0 +1,54 @@
+name: Manual Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      component:
+        description: "Which component to deploy"
+        required: true
+        type: choice
+        options:
+          - "web"
+          - "api"
+          - "both"
+        default: "both"
+      environment:
+        description: "Deployment environment"
+        required: true
+        type: choice
+        options:
+          - "production"
+          - "staging"
+          - "development"
+        default: "production"
+      deployment-strategy:
+        description: "API deployment strategy"
+        required: false
+        type: choice
+        options:
+          - "rolling"
+          - "blue-green"
+        default: "rolling"
+      image-tag:
+        description: "Custom Docker image tag (defaults to commit SHA)"
+        required: false
+        type: string
+
+jobs:
+  deploy-web:
+    if: ${{ github.event.inputs.component == 'web' || github.event.inputs.component == 'both' }}
+    uses: ./.github/workflows/deploy-web.yaml
+    with:
+      environment: ${{ github.event.inputs.environment }}
+      aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+    secrets: inherit
+
+  deploy-api:
+    if: ${{ github.event.inputs.component == 'api' || github.event.inputs.component == 'both' }}
+    uses: ./.github/workflows/deploy-api.yaml
+    with:
+      environment: ${{ github.event.inputs.environment }}
+      aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      deployment-strategy: ${{ github.event.inputs.deployment-strategy }}
+      image-tag: ${{ github.event.inputs.image-tag || github.sha }}
+    secrets: inherit

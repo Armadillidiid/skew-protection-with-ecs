@@ -1,0 +1,132 @@
+name: Deploy Web App
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "Deployment environment"
+        required: false
+        type: string
+        default: "production"
+      aws-region:
+        description: "AWS region"
+        required: false
+        type: string
+        default: "us-east-1"
+      stack-name:
+        description: "CloudFormation stack name for frontend"
+        required: false
+        type: string
+        default: "SkewProtectionStack/Frontend"
+    secrets:
+      AWS_ROLE_ARN:
+        description: "AWS IAM role ARN for authentication"
+        required: true
+
+jobs:
+  deploy-web:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js and install dependencies
+        uses: ./.github/composite/pnpm-install
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ inputs.aws-region }}
+          role-duration-seconds: 900
+
+      - name: Build web application
+        run: |
+          cd apps/web
+          pnpm run build
+          echo "✅ Web app built successfully"
+
+      - name: Get deployment targets from CloudFormation
+        id: get-targets
+        run: |
+          # Get S3 bucket name
+          BUCKET_NAME=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack-name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='WebsiteBucketName'].OutputValue" \
+            --output text)
+
+          # Get CloudFront distribution ID
+          CLOUDFRONT_ID=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack-name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='CloudFrontDistributionId'].OutputValue" \
+            --output text)
+
+          if [ -z "$BUCKET_NAME" ] || [ "$BUCKET_NAME" = "None" ]; then
+            echo "❌ Could not retrieve S3 bucket name from stack ${{ inputs.stack-name }}"
+            exit 1
+          fi
+
+          if [ -z "$CLOUDFRONT_ID" ] || [ "$CLOUDFRONT_ID" = "None" ]; then
+            echo "❌ Could not retrieve CloudFront distribution ID from stack ${{ inputs.stack-name }}"
+            exit 1
+          fi
+
+          echo "bucket-name=${BUCKET_NAME}" >> $GITHUB_OUTPUT
+          echo "cloudfront-id=${CLOUDFRONT_ID}" >> $GITHUB_OUTPUT
+          echo "📦 S3 Bucket: ${BUCKET_NAME}"
+          echo "🌐 CloudFront ID: ${CLOUDFRONT_ID}"
+
+      - name: Deploy to S3
+        run: |
+          echo "🚀 Deploying to S3 bucket: ${{ steps.get-targets.outputs.bucket-name }}"
+          aws s3 sync apps/web/dist/ s3://${{ steps.get-targets.outputs.bucket-name }}/ \
+            --delete \
+            --cache-control "public, max-age=31536000" \
+            --exclude "*.html" \
+            --exclude "*.json"
+
+          # Upload HTML and JSON files with no-cache
+          aws s3 sync apps/web/dist/ s3://${{ steps.get-targets.outputs.bucket-name }}/ \
+            --cache-control "no-cache, no-store, must-revalidate" \
+            --include "*.html" \
+            --include "*.json"
+
+          echo "✅ Files uploaded to S3"
+
+      - name: Invalidate CloudFront cache
+        run: |
+          echo "🔄 Invalidating CloudFront cache for distribution: ${{ steps.get-targets.outputs.cloudfront-id }}"
+          INVALIDATION_ID=$(aws cloudfront create-invalidation \
+            --distribution-id ${{ steps.get-targets.outputs.cloudfront-id }} \
+            --paths "/*" \
+            --query 'Invalidation.Id' \
+            --output text)
+
+          echo "📝 Invalidation ID: ${INVALIDATION_ID}"
+          echo "⏳ Waiting for invalidation to complete..."
+
+          aws cloudfront wait invalidation-completed \
+            --distribution-id ${{ steps.get-targets.outputs.cloudfront-id }} \
+            --id ${INVALIDATION_ID}
+
+          echo "✅ CloudFront cache invalidated successfully"
+
+      - name: Get website URL
+        run: |
+          WEBSITE_URL=$(aws cloudformation describe-stacks \
+            --stack-name ${{ inputs.stack-name }} \
+            --query "Stacks[0].Outputs[?OutputKey=='WebsiteURL'].OutputValue" \
+            --output text)
+
+          if [ ! -z "$WEBSITE_URL" ] && [ "$WEBSITE_URL" != "None" ]; then
+            echo "🌟 Web app deployed successfully!"
+            echo "🔗 Website URL: ${WEBSITE_URL}"
+          else
+            echo "✅ Web app deployed successfully!"
+          fi
