@@ -55,30 +55,59 @@ jobs:
       - name: Get deployment targets from CloudFormation
         id: get-targets
         run: |
+          # Resolve actual CloudFormation stack name from CDK construct path
+          STACK_INPUT="${{ inputs.stack-name }}"
+          
+          if [[ "$STACK_INPUT" == *"/"* ]]; then
+            # Convert CDK construct path to actual stack name pattern by removing slashes
+            STACK_PREFIX=$(echo "$STACK_INPUT" | sed 's/\///g')
+            echo "🔍 Looking for CloudFormation stack matching pattern: ${STACK_PREFIX}*"
+            
+            # Find the actual stack name
+            ACTUAL_STACK_NAME=$(aws cloudformation list-stacks \
+              --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
+              --query "StackSummaries[?starts_with(StackName, '${STACK_PREFIX}')].StackName" \
+              --output text | head -1)
+              
+            if [ -z "$ACTUAL_STACK_NAME" ]; then
+              echo "❌ Could not find CloudFormation stack matching pattern: ${STACK_PREFIX}*"
+              echo "Available stacks:"
+              aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE --query "StackSummaries[].StackName" --output text
+              exit 1
+            fi
+            
+            echo "✅ Found actual stack name: ${ACTUAL_STACK_NAME}"
+            STACK_NAME="$ACTUAL_STACK_NAME"
+          else
+            STACK_NAME="$STACK_INPUT"
+          fi
+
           # Get S3 bucket name
           BUCKET_NAME=$(aws cloudformation describe-stacks \
-            --stack-name ${{ inputs.stack-name }} \
+            --stack-name "$STACK_NAME" \
             --query "Stacks[0].Outputs[?OutputKey=='WebsiteBucketName'].OutputValue" \
             --output text)
 
           # Get CloudFront distribution ID
           CLOUDFRONT_ID=$(aws cloudformation describe-stacks \
-            --stack-name ${{ inputs.stack-name }} \
+            --stack-name "$STACK_NAME" \
             --query "Stacks[0].Outputs[?OutputKey=='CloudFrontDistributionId'].OutputValue" \
             --output text)
 
           if [ -z "$BUCKET_NAME" ] || [ "$BUCKET_NAME" = "None" ]; then
-            echo "❌ Could not retrieve S3 bucket name from stack ${{ inputs.stack-name }}"
+            echo "❌ Could not retrieve S3 bucket name from stack $STACK_NAME"
             exit 1
           fi
 
           if [ -z "$CLOUDFRONT_ID" ] || [ "$CLOUDFRONT_ID" = "None" ]; then
-            echo "❌ Could not retrieve CloudFront distribution ID from stack ${{ inputs.stack-name }}"
+            echo "❌ Could not retrieve CloudFront distribution ID from stack $STACK_NAME"
             exit 1
           fi
 
+          echo "stack-name=${STACK_NAME}" >> $GITHUB_OUTPUT
           echo "bucket-name=${BUCKET_NAME}" >> $GITHUB_OUTPUT
           echo "cloudfront-id=${CLOUDFRONT_ID}" >> $GITHUB_OUTPUT
+          echo "🏗️  CloudFormation Stack: ${STACK_NAME}"
           echo "📦 S3 Bucket: ${BUCKET_NAME}"
           echo "🌐 CloudFront ID: ${CLOUDFRONT_ID}"
 
@@ -120,7 +149,7 @@ jobs:
       - name: Get website URL
         run: |
           WEBSITE_URL=$(aws cloudformation describe-stacks \
-            --stack-name ${{ inputs.stack-name }} \
+            --stack-name ${{ steps.get-targets.outputs.stack-name }} \
             --query "Stacks[0].Outputs[?OutputKey=='WebsiteURL'].OutputValue" \
             --output text)
 

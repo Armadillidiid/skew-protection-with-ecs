@@ -59,42 +59,71 @@ jobs:
       - name: Get deployment targets from CloudFormation
         id: get-targets
         run: |
+          # Resolve actual CloudFormation stack name from CDK construct path
+          STACK_INPUT="${{ inputs.stack-name }}"
+
+          if [[ "$STACK_INPUT" == *"/"* ]]; then
+            # Convert CDK construct path to actual stack name pattern by removing slashes
+            STACK_PREFIX=$(echo "$STACK_INPUT" | sed 's/\///g')
+            echo "🔍 Looking for CloudFormation stack matching pattern: ${STACK_PREFIX}*"
+            
+            # Find the actual stack name
+            ACTUAL_STACK_NAME=$(aws cloudformation list-stacks \
+              --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
+              --query "StackSummaries[?starts_with(StackName, '${STACK_PREFIX}')].StackName" \
+              --output text | head -1)
+              
+            if [ -z "$ACTUAL_STACK_NAME" ]; then
+              echo "❌ Could not find CloudFormation stack matching pattern: ${STACK_PREFIX}*"
+              echo "Available stacks:"
+              aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE --query "StackSummaries[].StackName" --output text
+              exit 1
+            fi
+            
+            echo "✅ Found actual stack name: ${ACTUAL_STACK_NAME}"
+            STACK_NAME="$ACTUAL_STACK_NAME"
+          else
+            STACK_NAME="$STACK_INPUT"
+          fi
+
           # Get ECR repository URI
           ECR_URI=$(aws cloudformation describe-stacks \
-            --stack-name ${{ inputs.stack-name }} \
+            --stack-name "$STACK_NAME" \
             --query "Stacks[0].Outputs[?OutputKey=='ECRRepositoryURI'].OutputValue" \
             --output text)
 
           # Get ECS cluster name
           CLUSTER_NAME=$(aws cloudformation describe-stacks \
-            --stack-name ${{ inputs.stack-name }} \
+            --stack-name "$STACK_NAME" \
             --query "Stacks[0].Outputs[?OutputKey=='ECSClusterName'].OutputValue" \
             --output text)
 
           # Get ECS service name
           SERVICE_NAME=$(aws cloudformation describe-stacks \
-            --stack-name ${{ inputs.stack-name }} \
+            --stack-name "$STACK_NAME" \
             --query "Stacks[0].Outputs[?OutputKey=='ECSServiceName'].OutputValue" \
             --output text)
 
           if [ -z "$ECR_URI" ] || [ "$ECR_URI" = "None" ]; then
-            echo "❌ Could not retrieve ECR repository URI from stack ${{ inputs.stack-name }}"
+            echo "❌ Could not retrieve ECR repository URI from stack $STACK_NAME"
             exit 1
           fi
 
           if [ -z "$CLUSTER_NAME" ] || [ "$CLUSTER_NAME" = "None" ]; then
-            echo "❌ Could not retrieve ECS cluster name from stack ${{ inputs.stack-name }}"
+            echo "❌ Could not retrieve ECS cluster name from stack $STACK_NAME"
             exit 1
           fi
 
           if [ -z "$SERVICE_NAME" ] || [ "$SERVICE_NAME" = "None" ]; then
-            echo "❌ Could not retrieve ECS service name from stack ${{ inputs.stack-name }}"
+            echo "❌ Could not retrieve ECS service name from stack $STACK_NAME"
             exit 1
           fi
 
+          echo "stack-name=${STACK_NAME}" >> $GITHUB_OUTPUT
           echo "ecr-uri=${ECR_URI}" >> $GITHUB_OUTPUT
           echo "cluster-name=${CLUSTER_NAME}" >> $GITHUB_OUTPUT
           echo "service-name=${SERVICE_NAME}" >> $GITHUB_OUTPUT
+          echo "🏗️  CloudFormation Stack: ${STACK_NAME}"
           echo "🏗️  ECR Repository: ${ECR_URI}"
           echo "🔧 ECS Cluster: ${CLUSTER_NAME}"
           echo "⚙️  ECS Service: ${SERVICE_NAME}"
@@ -259,7 +288,7 @@ jobs:
             
             # Try to get the load balancer URL if available
             LB_URL=$(aws cloudformation describe-stacks \
-              --stack-name ${{ inputs.stack-name }} \
+              --stack-name ${{ steps.get-targets.outputs.stack-name }} \
               --query "Stacks[0].Outputs[?OutputKey=='LoadBalancerURL'].OutputValue" \
               --output text 2>/dev/null || echo "")
             

@@ -100,7 +100,7 @@ export class BackendStack extends cdk.Stack {
         availabilityZones: this.vpc.availabilityZones.slice(0, 2), // Limit to 2 AZs for cost control
       },
       deploymentStrategy: ecs.DeploymentStrategy.BLUE_GREEN,
-      deploymentController: { type: ecs.DeploymentControllerType.CODE_DEPLOY },
+      deploymentController: { type: ecs.DeploymentControllerType.ECS },
       minHealthyPercent: 100,
       maxHealthyPercent: 200,
       desiredCount: 1,

@@ -5,6 +5,7 @@
   "scripts": {
     "web": "pnpm --filter web",
     "api": "pnpm --filter api",
+    "infra": "pnpm --filter infra",
     "build": "pnpm --recursive build",
     "infra:destroy": "pnpm --filter infra exec cdk destroy --all",
     "infra:diff": "pnpm --filter infra exec cdk diff --all",

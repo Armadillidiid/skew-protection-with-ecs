@@ -57,14 +57,17 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
           role-duration-seconds: 900
 
+      - name: Build all packages
+        run: pnpm build
+
       - name: Pre-deployment validation
         run: |
-          pnpm exec cdk synth --all
-          pnpm exec cdk diff --all || echo "Diff completed with changes"
+          pnpm infra:synth
+          pnpm infra:diff || echo "Diff completed with changes"
 
       - name: Deploy
         run: |
-          pnpm exec cdk deploy --require-approval never --outputs-file outputs.json
+          pnpm infra cdk deploy --all --require-approval never --outputs-file outputs.json
 
       - name: Upload outputs
         uses: actions/upload-artifact@v4
