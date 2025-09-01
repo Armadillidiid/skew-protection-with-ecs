@@ -10,6 +10,8 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      id-token: write
+      actions: read
     outputs:
       web: ${{ steps.filter.outputs.web }}
       api: ${{ steps.filter.outputs.api }}
@@ -56,12 +58,12 @@ jobs:
 
       - name: Pre-deployment validation
         run: |
-          npx cdk synth --all
-          npx cdk diff --all || echo "Diff completed with changes"
+          pnpm exec cdk synth --all
+          pnpm exec cdk diff --all || echo "Diff completed with changes"
 
       - name: Deploy
         run: |
-          npx cdk deploy --require-approval never --outputs-file outputs.json
+          pnpm exec cdk deploy --require-approval never --outputs-file outputs.json
 
       - name: Upload outputs
         uses: actions/upload-artifact@v4
