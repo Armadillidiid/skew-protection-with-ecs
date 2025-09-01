@@ -1,0 +1,84 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  files-changed:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      web: ${{ steps.filter.outputs.web }}
+      api: ${{ steps.filter.outputs.api }}
+      infra: ${{ steps.filter.outputs.infra }}
+      packages: ${{ steps.filter.outputs.changes }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            web: &shared
+              - "*"
+              - ".github/**"
+              - "apps/web/**"
+            api:
+              - "*"
+              - ".github/**"
+              - "apps/api/**"
+            infra:
+              - "infra/**"
+
+  deploy-infra:
+    needs: [files-changed]
+    if: ${{ needs.files-changed.outputs.infra == 'true' }}
+    environment: production
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - uses: ./.github/composite/pnpm-install
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-duration-seconds: 900
+
+      - name: Pre-deployment validation
+        run: |
+          npx cdk synth --all
+          npx cdk diff --all || echo "Diff completed with changes"
+
+      - name: Deploy
+        run: |
+          STACK_NAME="${{ github.event.inputs.stack_name || 'WireguardCdkStack' }}"
+          npx cdk deploy ${STACK_NAME} --require-approval never --outputs-file outputs.json
+
+      - name: Upload outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: outputs
+          path: outputs.json
+          retention-days: 90
+
+  # deploy-web:
+  #   needs: files-changed
+  #   uses: ./.github/workflows/deploy-web.yaml
+  #   if: ${{ needs.files-changed.outputs.web == 'true' }}
+  #   secrets: inherit
+  #
+  # deploy-api:
+  #   needs: files-changed
+  #   uses: ./.github/workflows/deploy-api.yaml
+  #   if: ${{ needs.files-changed.outputs.api == 'true' }}
+  #   secrets: inherit
