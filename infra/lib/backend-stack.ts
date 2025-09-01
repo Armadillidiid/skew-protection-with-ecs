@@ -100,7 +100,7 @@ export class BackendStack extends cdk.Stack {
         availabilityZones: this.vpc.availabilityZones.slice(0, 2), // Limit to 2 AZs for cost control
       },
       deploymentStrategy: ecs.DeploymentStrategy.BLUE_GREEN,
-      deploymentController: { type: ecs.DeploymentControllerType.ECS },
+      bakeTime: cdk.Duration.minutes(15),
       minHealthyPercent: 100,
       maxHealthyPercent: 200,
       desiredCount: 1,
@@ -130,35 +130,10 @@ export class BackendStack extends cdk.Stack {
     );
 
     this.ecsService.attachToApplicationTargetGroup(this.blueTargetGroup);
-
-    const productionListener = this.loadBalancer.addListener(
-      "ProductionListener",
-      {
-        port: 80,
-        protocol: elbv2.ApplicationProtocol.HTTP,
-        defaultTargetGroups: [this.blueTargetGroup],
-      },
-    );
-
-    // CodeDeploy Application
-    this.codeDeployApplication = new codedeploy.EcsApplication(
-      this,
-      "CodeDeployApplication",
-    );
-
-    // CodeDeploy Deployment Group
-    new codedeploy.EcsDeploymentGroup(this, "DeploymentGroup", {
-      application: this.codeDeployApplication,
-      service: this.ecsService,
-      blueGreenDeploymentConfig: {
-        blueTargetGroup: this.blueTargetGroup,
-        greenTargetGroup: this.greenTargetGroup,
-        listener: productionListener,
-        deploymentApprovalWaitTime: cdk.Duration.minutes(5),
-        terminationWaitTime: cdk.Duration.minutes(5),
-      },
-      deploymentConfig:
-        codedeploy.EcsDeploymentConfig.CANARY_10PERCENT_5MINUTES,
+    this.loadBalancer.addListener("ProductionListener", {
+      port: 80,
+      protocol: elbv2.ApplicationProtocol.HTTP,
+      defaultTargetGroups: [this.blueTargetGroup],
     });
 
     // Outputs
