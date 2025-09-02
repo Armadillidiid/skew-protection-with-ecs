@@ -5,6 +5,7 @@
   "scripts": {
     "start": "node index.ts",
     "dev": "node --watch index.ts",
+    "build": "docker compose build",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "engines": {

@@ -6,7 +6,9 @@
     "web": "pnpm --filter web",
     "api": "pnpm --filter api",
     "infra": "pnpm --filter infra",
+    "dev": "pnpm --recursive dev",
     "build": "pnpm --recursive build",
+    "infra:deploy": "pnpm --filter infra exec cdk deploy --all",
     "infra:destroy": "pnpm --filter infra exec cdk destroy --all",
     "infra:diff": "pnpm --filter infra exec cdk diff --all",
     "infra:synth": "pnpm --filter infra exec cdk synth --all"
