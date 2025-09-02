@@ -77,18 +77,18 @@ jobs:
           retention-days: 90
 
   deploy-web:
-    needs: files-changed
+    needs: [files-changed, deploy-infra]
     uses: ./.github/workflows/deploy-web.yaml
-    if: ${{ needs.files-changed.outputs.web == 'true' }}
+    if: ${{ always() && needs.files-changed.outputs.web == 'true' }}
     with:
       environment: production
       aws-region: ${{ vars.AWS_REGION }}
     secrets: inherit
 
   deploy-api:
-    needs: files-changed
+    needs: [files-changed, deploy-infra]
     uses: ./.github/workflows/deploy-api.yaml
-    if: ${{ needs.files-changed.outputs.api == 'true' }}
+    if: ${{ always() && needs.files-changed.outputs.api == 'true' }}
     with:
       environment: production
       aws-region: ${{ vars.AWS_REGION }}
