@@ -21,14 +21,6 @@ on:
           - "staging"
           - "development"
         default: "production"
-      deployment-strategy:
-        description: "API deployment strategy"
-        required: false
-        type: choice
-        options:
-          - "rolling"
-          - "blue-green"
-        default: "rolling"
       image-tag:
         description: "Custom Docker image tag (defaults to commit SHA)"
         required: false
