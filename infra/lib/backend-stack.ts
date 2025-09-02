@@ -87,7 +87,8 @@ export class BackendStack extends cdk.Stack {
       healthCheck: {
         command: [
           "CMD-SHELL",
-          "curl -f http://localhost:3000/health || exit 1",
+          // Use Node.js instead of curl since Alpine Linux doesn't include curl by default
+          "node -e \"require('http').get('http://localhost:3000/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\"",
         ],
       },
     });
