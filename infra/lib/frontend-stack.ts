@@ -1,14 +1,9 @@
 import * as cdk from "aws-cdk-lib";
 import * as s3 from "aws-cdk-lib/aws-s3";
-import * as s3deploy from "aws-cdk-lib/aws-s3-deployment";
 import * as cloudfront from "aws-cdk-lib/aws-cloudfront";
 import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
+import * as iam from "aws-cdk-lib/aws-iam";
 import { Construct } from "constructs";
-import path from "path";
-import { fileURLToPath } from "url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 export interface FrontendStackProps extends cdk.StackProps {}
 
@@ -25,6 +20,8 @@ export class FrontendStack extends cdk.Stack {
       autoDeleteObjects: true,
       publicReadAccess: false,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      websiteIndexDocument: "index.html",
+      websiteErrorDocument: "index.html",
     });
 
     // CloudFront distribution
@@ -43,15 +40,6 @@ export class FrontendStack extends cdk.Stack {
         minimumProtocolVersion: cloudfront.SecurityPolicyProtocol.TLS_V1_2_2021,
       },
     );
-
-    new s3deploy.BucketDeployment(this, "DeployWebsite", {
-      sources: [
-        s3deploy.Source.asset(path.join(__dirname, "../../apps/web/dist")),
-      ],
-      destinationBucket: this.s3Bucket,
-      distribution: this.cloudFrontDistribution,
-      distributionPaths: ["/*"],
-    });
 
     // Outputs
     new cdk.CfnOutput(this, "WebsiteBucketName", {
