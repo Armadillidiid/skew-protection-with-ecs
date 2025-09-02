@@ -130,17 +130,22 @@ jobs:
           echo "✅ Successfully logged in to ECR"
 
       - name: Build and tag Docker image
+        working-directory: apps/api
         run: |
-          cd apps/api
           IMAGE_TAG="${{ inputs.image-tag }}"
           FULL_IMAGE_URI="${{ steps.get-targets.outputs.ecr-uri }}:${IMAGE_TAG}"
 
-          echo "🐳 Building Docker image..."
-          docker build -t ${FULL_IMAGE_URI} .
-          docker tag ${FULL_IMAGE_URI} ${{ steps.get-targets.outputs.ecr-uri }}:latest
+          echo "🐳 Building Docker..."
+
+          export IMAGE_TAG="${IMAGE_TAG}"
+          docker compose build
+
+          echo "🏷️  Tagging Docker image for ECR..."
+          docker tag "skew-protection-api:${IMAGE_TAG}" "${FULL_IMAGE_URI}"
+          docker tag "skew-protection-api:${IMAGE_TAG}" "${{ steps.get-targets.outputs.ecr-uri }}:latest"
 
           echo "image-uri=${FULL_IMAGE_URI}" >> $GITHUB_OUTPUT
-          echo "✅ Docker image built: ${FULL_IMAGE_URI}"
+          echo "✅ Docker image built and tagged: ${FULL_IMAGE_URI}"
 
       - name: Push Docker image to ECR
         id: push-image

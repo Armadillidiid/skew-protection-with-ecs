@@ -1,5 +1,6 @@
 services:
   api:
+    image: skew-protection-api:${IMAGE_TAG:-latest}
     build:
       context: ../../
       dockerfile: ./apps/api/Dockerfile
