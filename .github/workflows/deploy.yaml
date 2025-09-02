@@ -92,6 +92,5 @@ jobs:
     with:
       environment: production
       aws-region: ${{ vars.AWS_REGION }}
-      deployment-strategy: rolling
       image-tag: ${{ github.sha }}
     secrets: inherit

@@ -49,6 +49,5 @@ jobs:
     with:
       environment: ${{ github.event.inputs.environment }}
       aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
-      deployment-strategy: ${{ github.event.inputs.deployment-strategy }}
       image-tag: ${{ github.event.inputs.image-tag || github.sha }}
     secrets: inherit

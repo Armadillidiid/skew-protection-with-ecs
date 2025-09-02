@@ -18,11 +18,6 @@ on:
         required: false
         type: string
         default: "SkewProtectionStack/Backend"
-      deployment-strategy:
-        description: "Deployment strategy: rolling or blue-green"
-        required: false
-        type: string
-        default: "rolling"
       image-tag:
         description: "Docker image tag"
         required: false
@@ -197,10 +192,10 @@ jobs:
 
           echo "✅ Task definition updated"
 
-      - name: Deploy with rolling update
+      - name: Deploy with ECS blue-green
         if: ${{ inputs.deployment-strategy == 'rolling' }}
         run: |
-          echo "🚀 Starting rolling deployment..."
+          echo "🚀 Starting deployment..."
 
           # Register new task definition
           NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
@@ -220,42 +215,11 @@ jobs:
           echo "⏳ Waiting for service to reach stable state..."
           aws ecs wait services-stable \
             --cluster ${{ steps.get-targets.outputs.cluster-name }} \
-            --services ${{ steps.get-targets.outputs.service-name }}
+            --services ${{ steps.get-targets.outputs.service-name }} \
+            --max-attempts 60 \
+            --delay 30
 
           echo "✅ Rolling deployment completed successfully!"
-
-      # - name: Deploy with blue-green strategy
-      #   if: ${{ inputs.deployment-strategy == 'blue-green' }}
-      #   run: |
-      #     echo "🔵🟢 Starting blue-green deployment..."
-      #     echo "📝 Note: This requires CodeDeploy to be configured for your ECS service"
-      #
-      #     # This would typically integrate with AWS CodeDeploy
-      #     # For now, we'll fall back to rolling deployment
-      #     echo "⚠️  Blue-green deployment requires additional CodeDeploy configuration"
-      #     echo "🔄 Falling back to rolling deployment..."
-      #
-      #     # Register new task definition
-      #     NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
-      #       --cli-input-json file://final-task-definition.json \
-      #       --query 'taskDefinition.taskDefinitionArn' \
-      #       --output text)
-      #
-      #     echo "📝 New task definition registered: ${NEW_TASK_DEF_ARN}"
-      #
-      #     # Update the service with the new task definition
-      #     aws ecs update-service \
-      #       --cluster ${{ steps.get-targets.outputs.cluster-name }} \
-      #       --service ${{ steps.get-targets.outputs.service-name }} \
-      #       --task-definition ${NEW_TASK_DEF_ARN} \
-      #       --force-new-deployment
-      #
-      #     echo "⏳ Waiting for service to reach stable state..."
-      #     aws ecs wait services-stable \
-      #       --cluster ${{ steps.get-targets.outputs.cluster-name }} \
-      #       --services ${{ steps.get-targets.outputs.service-name }}
-      #
-      #     echo "✅ Deployment completed successfully!"
 
       - name: Verify deployment
         run: |
@@ -280,20 +244,28 @@ jobs:
             --query 'services[0].desiredCount' \
             --output text)
 
-          echo "📊 Service Status: ${SERVICE_STATUS}"
-          echo "🏃 Running Tasks: ${RUNNING_COUNT}/${DESIRED_COUNT}"
+          # Get deployment status to verify blue-green completion
+          DEPLOYMENT_STATUS=$(aws ecs describe-services \
+            --cluster ${{ steps.get-targets.outputs.cluster-name }} \
+            --services ${{ steps.get-targets.outputs.service-name }} \
+            --query 'services[0].deployments[0].status' \
+            --output text)
 
-          if [ "$SERVICE_STATUS" = "ACTIVE" ] && [ "$RUNNING_COUNT" = "$DESIRED_COUNT" ]; then
+          echo "Service Status: ${SERVICE_STATUS}"
+          echo "Running Tasks: ${RUNNING_COUNT}/${DESIRED_COUNT}"
+          echo "Deployment Status: ${DEPLOYMENT_STATUS}"
+
+          if [ "$SERVICE_STATUS" = "ACTIVE" ] && [ "$RUNNING_COUNT" = "$DESIRED_COUNT" ] && [ "$DEPLOYMENT_STATUS" = "PRIMARY" ]; then
             echo "✅ Deployment verification successful!"
             
             # Try to get the load balancer URL if available
             LB_URL=$(aws cloudformation describe-stacks \
               --stack-name ${{ steps.get-targets.outputs.stack-name }} \
-              --query "Stacks[0].Outputs[?OutputKey=='LoadBalancerURL'].OutputValue" \
+              --query "Stacks[0].Outputs[?OutputKey=='LoadBalancerDNS'].OutputValue" \
               --output text 2>/dev/null || echo "")
             
             if [ ! -z "$LB_URL" ] && [ "$LB_URL" != "None" ]; then
-              echo "🔗 API URL: ${LB_URL}"
+              echo "API URL: http://${LB_URL}"
             fi
           else
             echo "❌ Deployment verification failed!"
