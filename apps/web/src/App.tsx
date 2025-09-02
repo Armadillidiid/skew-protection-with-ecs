@@ -28,8 +28,8 @@ function App() {
     setError(null);
 
     try {
-      // Use localhost:3000 for development, you can make this configurable
-      const response = await fetch("http://localhost:3000/api/data");
+      const apiBaseUrl = import.meta.env.VITE_API_BASE_URL;
+      const response = await fetch(`${apiBaseUrl}/api/data`);
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
