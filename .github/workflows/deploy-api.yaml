@@ -197,8 +197,7 @@ jobs:
 
           echo "✅ Task definition updated"
 
-      - name: Deploy with ECS blue-green
-        if: ${{ inputs.deployment-strategy == 'rolling' }}
+      - name: Deploy updated task definition
         run: |
           echo "🚀 Starting deployment..."
 
@@ -214,17 +213,14 @@ jobs:
           aws ecs update-service \
             --cluster ${{ steps.get-targets.outputs.cluster-name }} \
             --service ${{ steps.get-targets.outputs.service-name }} \
-            --task-definition ${NEW_TASK_DEF_ARN} \
-            --force-new-deployment
+            --task-definition ${NEW_TASK_DEF_ARN}
 
           echo "⏳ Waiting for service to reach stable state..."
           aws ecs wait services-stable \
             --cluster ${{ steps.get-targets.outputs.cluster-name }} \
-            --services ${{ steps.get-targets.outputs.service-name }} \
-            --max-attempts 60 \
-            --delay 30
+            --services ${{ steps.get-targets.outputs.service-name }} 
 
-          echo "✅ Rolling deployment completed successfully!"
+          echo "✅ Deployment completed successfully!"
 
       - name: Verify deployment
         run: |
@@ -249,7 +245,7 @@ jobs:
             --query 'services[0].desiredCount' \
             --output text)
 
-          # Get deployment status to verify blue-green completion
+          # Get deployment status to verify deployment completion
           DEPLOYMENT_STATUS=$(aws ecs describe-services \
             --cluster ${{ steps.get-targets.outputs.cluster-name }} \
             --services ${{ steps.get-targets.outputs.service-name }} \
