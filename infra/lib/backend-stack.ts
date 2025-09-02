@@ -13,6 +13,7 @@ export class BackendStack extends cdk.Stack {
   public readonly loadBalancer: elbv2.ApplicationLoadBalancer;
   public readonly ecrRepository: ecr.Repository;
   public readonly ecsService: ecs.FargateService;
+  public readonly ecsCluster: ecs.Cluster;
   public readonly codeDeployApplication: codedeploy.EcsApplication;
   public readonly blueTargetGroup: elbv2.ApplicationTargetGroup;
   public readonly greenTargetGroup: elbv2.ApplicationTargetGroup;
@@ -32,7 +33,7 @@ export class BackendStack extends cdk.Stack {
     });
 
     // ECS Cluster
-    const cluster = new ecs.Cluster(this, "SkewProtectionCluster", {
+    this.ecsCluster = new ecs.Cluster(this, "SkewProtectionCluster", {
       vpc: this.vpc,
     });
 
@@ -93,7 +94,7 @@ export class BackendStack extends cdk.Stack {
 
     // ECS Service
     this.ecsService = new ecs.FargateService(this, "ApiService", {
-      cluster,
+      cluster: this.ecsCluster,
       taskDefinition,
       assignPublicIp: true,
       securityGroups: [ecsSecurityGroup],
@@ -185,6 +186,18 @@ export class BackendStack extends cdk.Stack {
       value: this.ecrRepository.repositoryUri,
       description: "ECR Repository URI",
       exportName: "SkewProtection-ECRRepositoryURI",
+    });
+
+    new cdk.CfnOutput(this, "ECSClusterName", {
+      value: this.ecsCluster.clusterName,
+      description: "ECS Cluster Name",
+      exportName: "SkewProtection-ECSClusterName",
+    });
+
+    new cdk.CfnOutput(this, "ECSServiceName", {
+      value: this.ecsService.serviceName,
+      description: "ECS Service Name",
+      exportName: "SkewProtection-ECSServiceName",
     });
   }
 }

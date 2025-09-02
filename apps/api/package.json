@@ -1,7 +1,7 @@
 {
   "name": "@repo/api",
   "type": "module",
-  "version": "0,0.1",
+  "version": "0.0.2",
   "scripts": {
     "start": "node index.ts",
     "dev": "node --watch index.ts",
