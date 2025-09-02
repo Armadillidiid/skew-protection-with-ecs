@@ -13,11 +13,16 @@ on:
         required: false
         type: string
         default: "us-east-1"
-      stack-name:
+      frontend-stack-name:
         description: "CloudFormation stack name for frontend"
         required: false
         type: string
         default: "SkewProtectionStack/Frontend"
+      backend-stack-name:
+        description: "CloudFormation stack name for backend"
+        required: false
+        type: string
+        default: "SkewProtectionStack/Backend"
     secrets:
       AWS_ROLE_ARN:
         description: "AWS IAM role ARN for authentication"
@@ -46,7 +51,60 @@ jobs:
           aws-region: ${{ inputs.aws-region }}
           role-duration-seconds: 900
 
+      - name: Get API endpoint from backend stack
+        id: get-api-endpoint
+        run: |
+          # Resolve actual CloudFormation stack name for backend
+          BACKEND_STACK_INPUT="${{ inputs.backend-stack-name }}"
+
+          if [[ "$BACKEND_STACK_INPUT" == *"/"* ]]; then
+            # Convert CDK construct path to actual stack name pattern
+            BACKEND_STACK_PREFIX=$(echo "$BACKEND_STACK_INPUT" | sed 's/\///g')
+            echo "🔍 Looking for backend CloudFormation stack matching pattern: ${BACKEND_STACK_PREFIX}*"
+            
+            # Find the actual backend stack name
+            ACTUAL_BACKEND_STACK_NAME=$(aws cloudformation list-stacks \
+              --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
+              --query "StackSummaries[?starts_with(StackName, '${BACKEND_STACK_PREFIX}')].StackName" \
+              --output text | head -1)
+              
+            if [ -z "$ACTUAL_BACKEND_STACK_NAME" ]; then
+              echo "❌ Could not find backend CloudFormation stack matching pattern: ${BACKEND_STACK_PREFIX}*"
+              echo "Available stacks:"
+              aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE --query "StackSummaries[].StackName" --output text
+              exit 1
+            fi
+            
+            echo "✅ Found actual backend stack name: ${ACTUAL_BACKEND_STACK_NAME}"
+            BACKEND_STACK_NAME="$ACTUAL_BACKEND_STACK_NAME"
+          else
+            BACKEND_STACK_NAME="$BACKEND_STACK_INPUT"
+          fi
+
+          # Get API endpoint from backend stack
+          API_ENDPOINT=$(aws cloudformation describe-stacks \
+            --stack-name "$BACKEND_STACK_NAME" \
+            --query "Stacks[0].Outputs[?OutputKey=='LoadBalancerDNS'].OutputValue" \
+            --output text)
+
+          if [ -z "$API_ENDPOINT" ] || [ "$API_ENDPOINT" = "None" ]; then
+            echo "❌ Could not retrieve API endpoint from backend stack $BACKEND_STACK_NAME"
+            echo "Available outputs:"
+            aws cloudformation describe-stacks --stack-name "$BACKEND_STACK_NAME" --query "Stacks[0].Outputs[].{Key:OutputKey,Value:OutputValue}" --output table
+            exit 1
+          fi
+
+          # Ensure it has http:// prefix
+          if [[ "$API_ENDPOINT" != http* ]]; then
+            API_ENDPOINT="http://${API_ENDPOINT}"
+          fi
+
+          echo "api-endpoint=${API_ENDPOINT}" >> $GITHUB_OUTPUT
+          echo "🌐 API Endpoint: ${API_ENDPOINT}"
+
       - name: Build web application
+        env:
+          VITE_API_BASE_URL: ${{ steps.get-api-endpoint.outputs.api-endpoint }}
         run: |
           cd apps/web
           pnpm run build
@@ -56,8 +114,8 @@ jobs:
         id: get-targets
         run: |
           # Resolve actual CloudFormation stack name from CDK construct path
-          STACK_INPUT="${{ inputs.stack-name }}"
-          
+          STACK_INPUT="${{ inputs.frontend-stack-name }}"
+
           if [[ "$STACK_INPUT" == *"/"* ]]; then
             # Convert CDK construct path to actual stack name pattern by removing slashes
             STACK_PREFIX=$(echo "$STACK_INPUT" | sed 's/\///g')
