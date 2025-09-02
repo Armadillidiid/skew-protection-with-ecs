@@ -108,6 +108,7 @@ export class BackendStack extends cdk.Stack {
       minHealthyPercent: 100,
       maxHealthyPercent: 200,
       desiredCount: 1,
+      circuitBreaker: { rollback: true },
     });
 
     const targetGroupProps = {
