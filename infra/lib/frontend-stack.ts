@@ -31,8 +31,8 @@ export class FrontendStack extends cdk.Stack {
       {
         defaultBehavior: {
           origin: origins.S3BucketOrigin.withOriginAccessControl(this.s3Bucket),
-          viewerProtocolPolicy:
-            cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+          // Allow HTTP since no SSL cert is configured for load balancer
+          viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.ALLOW_ALL,
           allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
           compress: true,
         },
