@@ -105,7 +105,7 @@ export class BackendStack extends cdk.Stack {
       bakeTime: cdk.Duration.minutes(15),
       minHealthyPercent: 100,
       maxHealthyPercent: 200,
-      desiredCount: 1,
+      desiredCount: 0, // TODO: Change this after initial deployment
     });
 
     const targetGroupProps = {
