@@ -1,6 +1,6 @@
 # Skew Protection Demo with ECS
 
-> NOTE: This project is an abandoned attempt to implement skew protection with ECS. The code is left here for reference purposes only.
+> NOTE: This project is an abandoned attempt to implement skew protection with ECS.
 
 This repository demonstrates an attempt to implement deployment skew protection using Amazon ECS for backend services. Skew protection ensures that clients always interact with compatible versions of your application during deployments, preventing version mismatch errors.
 
@@ -23,11 +23,14 @@ Priority 1000: Default (no header) → Current Production Target Group
 
 ## Why It Didn't Work
 
-I thought with B/G deployment, I could create a listener rule to route traffic to the old service before it gets deregistered out. Problem is ECS manages the weighted listener rule traffic itself, and it's hard to tell which is the current production target. That's one problem.
+I thought with B/G deployment, I could create a listener rule to route traffic to the old service before it gets deregistered. Problem is ECS alternates the production target group between Blue and Green on each deployment, making it hard to determine which target group is currently serving production. That's one problem.
 
-The second is we have to register a lifecycle hook for `PRODUCTION_TRAFFIC_SHIFT` and stall the deployment progress, unless ECS will immediately shift all production traffic to the green service tasks and deregister the blue service. At this point, I questioned the benefit of the outcome even if I was to get it to work versus its complexity.
+The second is we have to register a lifecycle hook for `PRODUCTION_TRAFFIC_SHIFT` and stall the deployment progress, unless ECS will immediately shift all production traffic to the green service tasks and deregister the blue service.
 
-The operational complexity of managing multiple concurrent deployments, ALB rule orchestration, and cleanup logic proved too cumbersome for the practical benefits gained. Frankly, it isn't worth it. But hey, the repo still serves as a great example of how to use B/G deployments in your CI/CD if you're into that.
+At this point, I questioned the benefit of the solution versus its complexity even if I was to get it to work
+The sheer complexity of managing ALB listener rules and cleanup logic proved too much for the practical benefits gained. IMHO, it isn't worth it.
+
+But hey, the repo still serves as a great example of how to use B/G deployments in your project with CI/CD.
 
 ## Tech Stack
 
