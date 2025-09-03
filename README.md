@@ -6,6 +6,10 @@ Consider a scenario where a user is actively using your web app when you deploy 
 
 With skew protection, the user continues to interact with the old backend version until they refresh their page and receive the new frontend code.
 
+> **UPDATE**: I couldn't find a way to make this work. I thought with B/G deployment, I could create a listener rule to route traffic to the old service before it gets phased out. Problem is ECS manages the weighted listener rule traffic itself and it's hard to tell which is the current production target. That's one problem.
+>
+> The second is we have to register a lifecycle hook for `PRODUCTION_TRAFFIC_SHIFT` and stall the deployment progress, unless ECS will immediately shift all production traffic to the green service tasks. At this point, I questioned the benefit of the outcome even if I was to get it to work versus its complexity. Frankly, it isn't worth it. But hey, the repo still serves as a great example of how to use B/G deployments in your CI/CD if you're into that.
+
 ## Tech Stack
 
 1. **Frontend**: Vite + React
