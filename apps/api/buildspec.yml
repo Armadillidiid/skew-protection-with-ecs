@@ -13,8 +13,7 @@ phases:
     commands:
       - echo Build started on `date`
       - echo Building the Docker image...
-      - cd apps/api
-      - docker build -t $REPOSITORY_URI:latest -t $REPOSITORY_URI:$IMAGE_TAG .
+      - docker build -f apps/api/Dockerfile -t $REPOSITORY_URI:latest -t $REPOSITORY_URI:$IMAGE_TAG .
       - echo Build completed on `date`
   post_build:
     commands:
@@ -23,15 +22,15 @@ phases:
       - docker push $REPOSITORY_URI:$IMAGE_TAG
       - echo Container image to be used $REPOSITORY_URI:$IMAGE_TAG
       - echo Preparing task definition and appspec files...
-      - sed -i "s|REPOSITORY_URI|${REPOSITORY_URI}|g" taskdef.json
-      - sed -i "s|IMAGE_TAG|${IMAGE_TAG}|g" taskdef.json
-      - sed -i "s|TASK_ROLE_ARN|${TASK_ROLE_ARN}|g" taskdef.json
-      - sed -i "s|EXECUTION_ROLE_ARN|${EXECUTION_ROLE_ARN}|g" taskdef.json
-      - sed -i "s|AWS_DEFAULT_REGION|${AWS_DEFAULT_REGION}|g" taskdef.json
-      - sed -i "s|TASK_DEFINITION_ARN|${TASK_DEFINITION_ARN}|g" appspec.yml
+      - sed -i "s|REPOSITORY_URI|${REPOSITORY_URI}|g" apps/api/taskdef.json
+      - sed -i "s|IMAGE_TAG|${IMAGE_TAG}|g" apps/api/taskdef.json
+      - sed -i "s|TASK_ROLE_ARN|${TASK_ROLE_ARN}|g" apps/api/taskdef.json
+      - sed -i "s|EXECUTION_ROLE_ARN|${EXECUTION_ROLE_ARN}|g" apps/api/taskdef.json
+      - sed -i "s|AWS_DEFAULT_REGION|${AWS_DEFAULT_REGION}|g" apps/api/taskdef.json
+      - sed -i "s|TASK_DEFINITION_ARN|${TASK_DEFINITION_ARN}|g" apps/api/appspec.yml
       - echo Files prepared successfully
-      - cat taskdef.json
-      - cat appspec.yml
+      - cat apps/api/taskdef.json
+      - cat apps/api/appspec.yml
       - echo Image pushed successfully
 
 artifacts:
