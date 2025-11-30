@@ -37,4 +37,4 @@ artifacts:
   files:
     - apps/api/appspec.yml
     - apps/api/taskdef.json
-  discard-paths: no
+  discard-paths: yes
