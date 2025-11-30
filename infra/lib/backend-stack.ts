@@ -190,17 +190,14 @@ export class BackendStack extends cdk.Stack {
           computeType: codebuild.ComputeType.SMALL,
         },
         environmentVariables: {
-          AWS_DEFAULT_REGION: {
-            value: this.region,
-          },
-          AWS_ACCOUNT_ID: {
-            value: this.account,
-          },
-          IMAGE_REPO_NAME: {
-            value: this.ecrRepository.repositoryName,
-          },
-          IMAGE_TAG: {
-            value: "latest",
+          AWS_DEFAULT_REGION: { value: this.region },
+          AWS_ACCOUNT_ID: { value: this.account },
+          IMAGE_REPO_NAME: { value: this.ecrRepository.repositoryName },
+          IMAGE_TAG: { value: "latest" },
+          TASK_DEFINITION_ARN: { value: this.taskDefinition.taskDefinitionArn },
+          TASK_ROLE_ARN: { value: this.taskDefinition.taskRole.roleArn },
+          EXECUTION_ROLE_ARN: {
+            value: this.taskDefinition.executionRole?.roleArn,
           },
         },
       },
@@ -249,7 +246,7 @@ export class BackendStack extends cdk.Stack {
 
     // Source output artifact
     const sourceOutput = new codepipeline.Artifact("SourceOutput");
-    
+
     // Build output artifact
     const buildOutput = new codepipeline.Artifact("BuildOutput");
 
@@ -283,20 +280,6 @@ export class BackendStack extends cdk.Stack {
           project: this.codeBuildProject,
           input: sourceOutput,
           outputs: [buildOutput],
-          environmentVariables: {
-            IMAGE_TAG: {
-              value: "latest", // Will be overridden by GitHub Actions
-            },
-            TASK_ROLE_ARN: {
-              value: this.taskDefinition.taskRole.roleArn,
-            },
-            EXECUTION_ROLE_ARN: {
-              value: this.taskDefinition.executionRole!.roleArn,
-            },
-            TASK_DEFINITION_ARN: {
-              value: this.taskDefinition.taskDefinitionArn,
-            },
-          },
         }),
       ],
     });
