@@ -17,11 +17,6 @@ on:
         required: false
         type: string
         default: "us-east-1"
-      image-tag:
-        description: "Docker image tag (API only)"
-        required: false
-        type: string
-        default: ${{ github.sha }}
     secrets:
       AWS_ROLE_ARN:
         description: "AWS IAM role ARN for authentication"
@@ -123,11 +118,10 @@ jobs:
           echo "⬆️  Uploading source artifact to S3..."
           
           SOURCE_BUCKET="${{ steps.get-pipeline.outputs.source-bucket }}"
-          IMAGE_TAG="${{ inputs.image-tag }}"
           
           # Upload with metadata
           aws s3 cp source.zip s3://${SOURCE_BUCKET}/source.zip \
-            --metadata commit=${{ github.sha }},branch=${{ github.ref_name }},tag=${IMAGE_TAG}
+            --metadata commit=${{ github.sha }},branch=${{ github.ref_name }}
           
           echo "✅ Source uploaded to s3://${SOURCE_BUCKET}/source.zip"
 
