@@ -222,7 +222,6 @@ export class BackendStack extends cdk.Stack {
           blueTargetGroup: this.blueTargetGroup,
           greenTargetGroup: this.greenTargetGroup,
           listener: productionListener,
-          terminationWaitTime: cdk.Duration.minutes(5),
         },
       },
     );
