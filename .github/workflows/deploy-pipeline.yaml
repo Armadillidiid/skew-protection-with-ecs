@@ -1,0 +1,186 @@
+name: Deploy Application (CodePipeline)
+
+on:
+  workflow_call:
+    inputs:
+      stack-name:
+        description: "CloudFormation stack name (e.g., SkewProtectionStack/Backend or SkewProtectionStack/Frontend)"
+        required: true
+        type: string
+      environment:
+        description: "Deployment environment"
+        required: false
+        type: string
+        default: "production"
+      aws-region:
+        description: "AWS region"
+        required: false
+        type: string
+        default: "us-east-1"
+    secrets:
+      AWS_ROLE_ARN:
+        description: "AWS IAM role ARN for authentication"
+        required: true
+
+jobs:
+  trigger-pipeline:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ inputs.aws-region }}
+          role-duration-seconds: 1800
+
+      - name: Get Pipeline resources from stack
+        id: get-pipeline
+        run: |
+          STACK_INPUT="${{ inputs.stack-name }}"
+          
+          # Resolve actual CloudFormation stack name from CDK construct path
+          if [[ "$STACK_INPUT" == *"/"* ]]; then
+            # Convert CDK construct path to actual stack name pattern
+            STACK_PREFIX=$(echo "$STACK_INPUT" | sed 's/\///g')
+            echo "🔍 Looking for CloudFormation stack matching pattern: ${STACK_PREFIX}*"
+            
+            # Find the actual stack name
+            ACTUAL_STACK_NAME=$(aws cloudformation list-stacks \
+              --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
+              --query "StackSummaries[?starts_with(StackName, '${STACK_PREFIX}')].StackName" \
+              --output text | head -1)
+              
+            if [ -z "$ACTUAL_STACK_NAME" ]; then
+              echo "❌ Could not find CloudFormation stack matching pattern: ${STACK_PREFIX}*"
+              echo "Available stacks:"
+              aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE --query "StackSummaries[].StackName" --output text
+              exit 1
+            fi
+            
+            echo "✅ Found actual stack name: ${ACTUAL_STACK_NAME}"
+            STACK_NAME="$ACTUAL_STACK_NAME"
+          else
+            STACK_NAME="$STACK_INPUT"
+          fi
+          
+          # Get pipeline name from CloudFormation stack outputs
+          PIPELINE_NAME=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query "Stacks[0].Outputs[?OutputKey=='PipelineName'].OutputValue" \
+            --output text)
+          
+          if [ -z "$PIPELINE_NAME" ] || [ "$PIPELINE_NAME" = "None" ]; then
+            echo "❌ Could not find PipelineName output in stack $STACK_NAME"
+            echo "Available outputs:"
+            aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query "Stacks[0].Outputs[].{Key:OutputKey,Value:OutputValue}" --output table
+            exit 1
+          fi
+          
+          # Get source bucket from CloudFormation stack outputs
+          SOURCE_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query "Stacks[0].Outputs[?OutputKey=='SourceBucketName'].OutputValue" \
+            --output text)
+          
+          if [ -z "$SOURCE_BUCKET" ] || [ "$SOURCE_BUCKET" = "None" ]; then
+            echo "❌ Could not find SourceBucketName output in stack $STACK_NAME"
+            exit 1
+          fi
+          
+          echo "stack-name=${STACK_NAME}" >> $GITHUB_OUTPUT
+          echo "pipeline-name=${PIPELINE_NAME}" >> $GITHUB_OUTPUT
+          echo "source-bucket=${SOURCE_BUCKET}" >> $GITHUB_OUTPUT
+          
+          echo "📦 Stack: ${STACK_NAME}"
+          echo "🔧 Pipeline: ${PIPELINE_NAME}"
+          echo "🪣 Source Bucket: ${SOURCE_BUCKET}"
+
+      - name: Package source code
+        run: |
+          echo "📦 Creating source artifact..."
+          
+          # Create a clean zip of the repository
+          git archive --format=zip --output=source.zip HEAD
+          
+          echo "✅ Source artifact created: $(du -h source.zip | cut -f1)"
+
+      - name: Upload source to S3
+        run: |
+          echo "⬆️  Uploading source artifact to S3..."
+          
+          SOURCE_BUCKET="${{ steps.get-pipeline.outputs.source-bucket }}"
+          
+          # Upload with metadata
+          aws s3 cp source.zip s3://${SOURCE_BUCKET}/source.zip \
+            --metadata commit=${{ github.sha }},branch=${{ github.ref_name }}
+          
+          echo "✅ Source uploaded to s3://${SOURCE_BUCKET}/source.zip"
+
+      - name: Start CodePipeline execution
+        id: start-pipeline
+        run: |
+          echo "🚀 Starting CodePipeline execution..."
+          
+          PIPELINE_NAME="${{ steps.get-pipeline.outputs.pipeline-name }}"
+          
+          # Start pipeline with custom variables
+          EXECUTION_ID=$(aws codepipeline start-pipeline-execution \
+            --name "${PIPELINE_NAME}" \
+            --client-request-token "${{ github.sha }}-${{ github.run_id }}" \
+            --query 'pipelineExecutionId' \
+            --output text)
+          
+          echo "execution-id=${EXECUTION_ID}" >> $GITHUB_OUTPUT
+          echo "📋 Execution ID: ${EXECUTION_ID}"
+          echo "🔗 View in AWS Console: https://console.aws.amazon.com/codesuite/codepipeline/pipelines/${PIPELINE_NAME}/view"
+
+      - name: Wait for pipeline completion
+        run: |
+          echo "⏳ Waiting for CodePipeline to complete..."
+          PIPELINE_NAME="${{ steps.get-pipeline.outputs.pipeline-name }}"
+          EXECUTION_ID="${{ steps.start-pipeline.outputs.execution-id }}"
+          
+          # Poll pipeline status
+          while true; do
+            PIPELINE_STATUS=$(aws codepipeline get-pipeline-execution \
+              --pipeline-name "${PIPELINE_NAME}" \
+              --pipeline-execution-id "${EXECUTION_ID}" \
+              --query 'pipelineExecution.status' \
+              --output text)
+            
+            echo "Current pipeline status: ${PIPELINE_STATUS}"
+            
+            if [ "$PIPELINE_STATUS" = "Succeeded" ]; then
+              echo "✅ Pipeline execution succeeded!"
+              break
+            elif [ "$PIPELINE_STATUS" = "Failed" ] || [ "$PIPELINE_STATUS" = "Stopped" ] || [ "$PIPELINE_STATUS" = "Stopping" ]; then
+              echo "❌ Pipeline execution failed with status: ${PIPELINE_STATUS}"
+              
+              # Get detailed failure info
+              echo "📄 Fetching pipeline execution details..."
+              aws codepipeline get-pipeline-execution \
+                --pipeline-name "${PIPELINE_NAME}" \
+                --pipeline-execution-id "${EXECUTION_ID}" \
+                --query 'pipelineExecution' \
+                --output json
+              exit 1
+            fi
+            
+            sleep 15
+          done
+
+      - name: Cleanup
+        if: always()
+        run: |
+          # Clean up temporary files
+          rm -f source.zip
+          echo "🧹 Cleanup completed"

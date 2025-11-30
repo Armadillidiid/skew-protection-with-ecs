@@ -3,6 +3,18 @@ name: Deploy
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      deploy-web:
+        description: "Deploy web application"
+        required: false
+        type: boolean
+        default: true
+      deploy-api:
+        description: "Deploy API application"
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -65,7 +77,7 @@ jobs:
           pnpm infra:synth
           pnpm infra:diff || echo "Diff completed with changes"
 
-      - name: Deploy
+      - name: Deploy infrastructure
         run: |
           pnpm infra cdk deploy --all --require-approval never --outputs-file outputs.json
 
@@ -78,19 +90,18 @@ jobs:
 
   deploy-web:
     needs: [files-changed, deploy-infra]
-    uses: ./.github/workflows/deploy-web.yaml
-    if: ${{ always() && needs.files-changed.outputs.web == 'true' }}
+    uses: ./.github/workflows/deploy-pipeline.yaml
+    if: ${{ always() && needs.files-changed.outputs.web == 'true' && (github.event_name != 'workflow_dispatch' || inputs.deploy-web) }}
     with:
-      environment: production
+      stack-name: SkewProtectionStack/Frontend
       aws-region: ${{ vars.AWS_REGION }}
     secrets: inherit
 
   deploy-api:
     needs: [files-changed, deploy-infra]
-    uses: ./.github/workflows/deploy-api.yaml
-    if: ${{ always() && needs.files-changed.outputs.api == 'true' }}
+    uses: ./.github/workflows/deploy-pipeline.yaml
+    if: ${{ always() && needs.files-changed.outputs.api == 'true' && (github.event_name != 'workflow_dispatch' || inputs.deploy-api) }}
     with:
-      environment: production
+      stack-name: SkewProtectionStack/Backend
       aws-region: ${{ vars.AWS_REGION }}
-      image-tag: ${{ github.sha }}
     secrets: inherit

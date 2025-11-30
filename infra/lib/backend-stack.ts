@@ -4,6 +4,10 @@ import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import * as ecr from "aws-cdk-lib/aws-ecr";
 import * as codedeploy from "aws-cdk-lib/aws-codedeploy";
+import * as codebuild from "aws-cdk-lib/aws-codebuild";
+import * as codepipeline from "aws-cdk-lib/aws-codepipeline";
+import * as codepipeline_actions from "aws-cdk-lib/aws-codepipeline-actions";
+import * as s3 from "aws-cdk-lib/aws-s3";
 import { Construct } from "constructs";
 
 export interface BackendStackProps extends cdk.StackProps {}
@@ -14,9 +18,14 @@ export class BackendStack extends cdk.Stack {
   public readonly ecrRepository: ecr.Repository;
   public readonly ecsService: ecs.FargateService;
   public readonly ecsCluster: ecs.Cluster;
+  public readonly taskDefinition: ecs.FargateTaskDefinition;
   public readonly codeDeployApplication: codedeploy.EcsApplication;
+  public readonly codeDeployDeploymentGroup: codedeploy.EcsDeploymentGroup;
+  public readonly codeBuildProject: codebuild.Project;
   public readonly blueTargetGroup: elbv2.ApplicationTargetGroup;
   public readonly greenTargetGroup: elbv2.ApplicationTargetGroup;
+  public readonly pipeline: codepipeline.Pipeline;
+  public readonly sourceArtifactBucket: s3.Bucket;
 
   constructor(scope: Construct, id: string, props: BackendStackProps = {}) {
     super(scope, id, props);
@@ -65,7 +74,7 @@ export class BackendStack extends cdk.Stack {
     ecsSecurityGroup.addIngressRule(albSecurityGroup, ec2.Port.allTcp());
 
     // Task Definition
-    const taskDefinition = new ecs.FargateTaskDefinition(
+    this.taskDefinition = new ecs.FargateTaskDefinition(
       this,
       "ApiTaskDefinition",
       {
@@ -75,7 +84,7 @@ export class BackendStack extends cdk.Stack {
     );
 
     // Container Definition
-    const container = taskDefinition.addContainer("node-api", {
+    this.taskDefinition.addContainer("node-api", {
       image: ecs.ContainerImage.fromEcrRepository(this.ecrRepository),
       portMappings: [
         {
@@ -91,24 +100,26 @@ export class BackendStack extends cdk.Stack {
           "node -e \"require('http').get('http://localhost:3000/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\"",
         ],
       },
+      logging: ecs.LogDrivers.awsLogs({ streamPrefix: "api" }),
     });
 
     // ECS Service
     this.ecsService = new ecs.FargateService(this, "ApiService", {
       cluster: this.ecsCluster,
-      taskDefinition,
+      taskDefinition: this.taskDefinition,
       assignPublicIp: true,
       securityGroups: [ecsSecurityGroup],
       vpcSubnets: {
         subnetType: ec2.SubnetType.PUBLIC,
         availabilityZones: this.vpc.availabilityZones.slice(0, 2), // Limit to 2 AZs for cost control
       },
-      deploymentStrategy: ecs.DeploymentStrategy.BLUE_GREEN,
+      deploymentController: {
+        type: ecs.DeploymentControllerType.CODE_DEPLOY,
+      },
       bakeTime: cdk.Duration.minutes(5),
       minHealthyPercent: 100,
       maxHealthyPercent: 200,
       desiredCount: 1,
-      circuitBreaker: { rollback: true },
     });
 
     const targetGroupProps = {
@@ -162,20 +173,129 @@ export class BackendStack extends cdk.Stack {
       },
     );
 
-    const target = this.ecsService.loadBalancerTarget({
-      containerName: container.containerName,
-      containerPort: 3000,
-      protocol: ecs.Protocol.TCP,
-      alternateTarget: new ecs.AlternateTarget("LBAlternateOptions", {
-        alternateTargetGroup: this.greenTargetGroup,
-        productionListener:
-          ecs.ListenerRuleConfiguration.applicationListenerRule(
-            prodListenerRule,
-          ),
-      }),
+    // Attach ECS service to blue target group
+    this.blueTargetGroup.addTarget(this.ecsService);
+
+    // CodeBuild Project for building Docker images
+    this.codeBuildProject = new codebuild.PipelineProject(
+      this,
+      "ApiCodeBuildProject",
+      {
+        buildSpec: codebuild.BuildSpec.fromSourceFilename(
+          "apps/api/buildspec.yml",
+        ),
+        environment: {
+          buildImage: codebuild.LinuxBuildImage.STANDARD_7_0,
+          privileged: true, // Required for Docker builds
+          computeType: codebuild.ComputeType.SMALL,
+        },
+        environmentVariables: {
+          AWS_DEFAULT_REGION: { value: this.region },
+          AWS_ACCOUNT_ID: { value: this.account },
+          IMAGE_REPO_NAME: { value: this.ecrRepository.repositoryName },
+          IMAGE_TAG: { value: "latest" },
+          TASK_DEFINITION_ARN: { value: this.taskDefinition.taskDefinitionArn },
+          TASK_ROLE_ARN: { value: this.taskDefinition.taskRole.roleArn },
+          EXECUTION_ROLE_ARN: {
+            value: this.taskDefinition.executionRole?.roleArn,
+          },
+        },
+      },
+    );
+
+    // Grant ECR permissions to CodeBuild
+    this.ecrRepository.grantPullPush(this.codeBuildProject);
+
+    // CodeDeploy Application for Blue/Green deployments
+    this.codeDeployApplication = new codedeploy.EcsApplication(
+      this,
+      "ApiCodeDeployApplication",
+    );
+
+    // CodeDeploy Deployment Group for Blue/Green deployments
+    this.codeDeployDeploymentGroup = new codedeploy.EcsDeploymentGroup(
+      this,
+      "ApiDeploymentGroup",
+      {
+        application: this.codeDeployApplication,
+        service: this.ecsService,
+        blueGreenDeploymentConfig: {
+          blueTargetGroup: this.blueTargetGroup,
+          greenTargetGroup: this.greenTargetGroup,
+          listener: productionListener,
+          terminationWaitTime: cdk.Duration.minutes(5),
+        },
+      },
+    );
+
+    // CodePipeline Setup
+    // S3 bucket for pipeline artifacts
+    const artifactBucket = new s3.Bucket(this, "ApiPipelineArtifacts", {
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      autoDeleteObjects: true,
+      encryption: s3.BucketEncryption.S3_MANAGED,
     });
 
-    target.attachToApplicationTargetGroup(this.blueTargetGroup);
+    // S3 bucket for source artifacts (uploaded by GitHub Actions)
+    this.sourceArtifactBucket = new s3.Bucket(this, "ApiSourceArtifacts", {
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      autoDeleteObjects: true,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      versioned: true, // Required for CodePipeline S3 source
+    });
+
+    // Source output artifact
+    const sourceOutput = new codepipeline.Artifact("SourceOutput");
+
+    // Build output artifact
+    const buildOutput = new codepipeline.Artifact("BuildOutput");
+
+    // CodePipeline - Manual trigger (no automatic GitHub source)
+    this.pipeline = new codepipeline.Pipeline(this, "ApiPipeline", {
+      pipelineName: "skew-protection-api-pipeline",
+      artifactBucket,
+      restartExecutionOnUpdate: false, // Don't auto-restart on stack updates
+    });
+
+    // Stage 1: Source from S3 (uploaded by GitHub Actions)
+    this.pipeline.addStage({
+      stageName: "Source",
+      actions: [
+        new codepipeline_actions.S3SourceAction({
+          actionName: "S3_Source",
+          bucket: this.sourceArtifactBucket,
+          bucketKey: "source.zip",
+          output: sourceOutput,
+          trigger: codepipeline_actions.S3Trigger.NONE, // Manual trigger only
+        }),
+      ],
+    });
+
+    // Stage 2: Build with CodeBuild
+    this.pipeline.addStage({
+      stageName: "Build",
+      actions: [
+        new codepipeline_actions.CodeBuildAction({
+          actionName: "Build_Docker_Image",
+          project: this.codeBuildProject,
+          input: sourceOutput,
+          outputs: [buildOutput],
+        }),
+      ],
+    });
+
+    // Stage 3: Deploy with CodeDeploy
+    this.pipeline.addStage({
+      stageName: "Deploy",
+      actions: [
+        new codepipeline_actions.CodeDeployEcsDeployAction({
+          actionName: "Deploy_to_ECS",
+          deploymentGroup: this.codeDeployDeploymentGroup,
+          taskDefinitionTemplateInput: buildOutput,
+          appSpecTemplateInput: buildOutput,
+        }),
+      ],
+    });
 
     // Outputs
     new cdk.CfnOutput(this, "LoadBalancerDNS", {
@@ -200,6 +320,61 @@ export class BackendStack extends cdk.Stack {
       value: this.ecsService.serviceName,
       description: "ECS Service Name",
       exportName: "SkewProtection-ECSServiceName",
+    });
+
+    new cdk.CfnOutput(this, "CodeBuildProjectName", {
+      value: this.codeBuildProject.projectName,
+      description: "CodeBuild Project Name",
+      exportName: "SkewProtection-CodeBuildProjectName",
+    });
+
+    new cdk.CfnOutput(this, "CodeDeployApplicationName", {
+      value: this.codeDeployApplication.applicationName,
+      description: "CodeDeploy Application Name",
+      exportName: "SkewProtection-CodeDeployApplicationName",
+    });
+
+    new cdk.CfnOutput(this, "CodeDeployDeploymentGroupName", {
+      value: this.codeDeployDeploymentGroup.deploymentGroupName,
+      description: "CodeDeploy Deployment Group Name",
+      exportName: "SkewProtection-CodeDeployDeploymentGroupName",
+    });
+
+    new cdk.CfnOutput(this, "TaskRoleArn", {
+      value: this.taskDefinition.taskRole.roleArn,
+      description: "ECS Task Role ARN",
+      exportName: "SkewProtection-TaskRoleArn",
+    });
+
+    new cdk.CfnOutput(this, "ExecutionRoleArn", {
+      value: this.taskDefinition.executionRole!.roleArn,
+      description: "ECS Task Execution Role ARN",
+      exportName: "SkewProtection-ExecutionRoleArn",
+    });
+
+    new cdk.CfnOutput(this, "TaskDefinitionArn", {
+      value: this.taskDefinition.taskDefinitionArn,
+      description: "ECS Task Definition ARN",
+      exportName: "SkewProtection-TaskDefinitionArn",
+    });
+
+    new cdk.CfnOutput(this, "PipelineName", {
+      value: this.pipeline.pipelineName,
+      description: "API CodePipeline Name",
+      exportName: "SkewProtection-ApiPipelineName",
+    });
+
+    new cdk.CfnOutput(this, "PipelineArn", {
+      value: this.pipeline.pipelineArn,
+      description: "API CodePipeline ARN",
+      exportName: "SkewProtection-ApiPipelineArn",
+    });
+
+    new cdk.CfnOutput(this, "SourceBucketName", {
+      value: this.sourceArtifactBucket.bucketName,
+      description:
+        "S3 bucket for source artifacts (GitHub Actions uploads here)",
+      exportName: "SkewProtection-ApiSourceBucket",
     });
   }
 }

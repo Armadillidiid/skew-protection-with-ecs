@@ -160,6 +160,24 @@ export class GitHubOidcStack extends cdk.Stack {
       })
     );
 
+    // CodeBuild permissions for building and deploying applications
+    githubActionsRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["codebuild:*"],
+        resources: ["*"],
+      })
+    );
+
+    // CodeDeploy permissions for blue/green deployments
+    githubActionsRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["codedeploy:*"],
+        resources: ["*"],
+      })
+    );
+
     // Output the role ARN for use in GitHub Actions
     new cdk.CfnOutput(this, "GitHubActionsRoleArn", {
       value: githubActionsRole.roleArn,
