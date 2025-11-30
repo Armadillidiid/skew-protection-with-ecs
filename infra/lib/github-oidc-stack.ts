@@ -25,7 +25,7 @@ export class GitHubOidcStack extends cdk.Stack {
       {
         url: "https://token.actions.githubusercontent.com",
         clientIds: ["sts.amazonaws.com"],
-      }
+      },
     );
 
     // Create the role
@@ -39,7 +39,7 @@ export class GitHubOidcStack extends cdk.Stack {
           StringLike: {
             "token.actions.githubusercontent.com:sub": `repo:${orgName.valueAsString}/${repoName.valueAsString}:*`,
           },
-        }
+        },
       ),
     });
 
@@ -49,7 +49,7 @@ export class GitHubOidcStack extends cdk.Stack {
         effect: iam.Effect.ALLOW,
         actions: ["cloudformation:*"],
         resources: ["*"],
-      })
+      }),
     );
 
     // S3 permissions for web app deployment and CDK assets
@@ -58,7 +58,7 @@ export class GitHubOidcStack extends cdk.Stack {
         effect: iam.Effect.ALLOW,
         actions: ["s3:*"],
         resources: ["*"],
-      })
+      }),
     );
 
     // CloudFront permissions for web app deployment
@@ -67,7 +67,7 @@ export class GitHubOidcStack extends cdk.Stack {
         effect: iam.Effect.ALLOW,
         actions: ["cloudfront:*"],
         resources: ["*"],
-      })
+      }),
     );
 
     // ECR permissions for API container deployment
@@ -76,7 +76,7 @@ export class GitHubOidcStack extends cdk.Stack {
         effect: iam.Effect.ALLOW,
         actions: ["ecr:*"],
         resources: ["*"],
-      })
+      }),
     );
 
     // ECS permissions for API deployment
@@ -85,7 +85,7 @@ export class GitHubOidcStack extends cdk.Stack {
         effect: iam.Effect.ALLOW,
         actions: ["ecs:*"],
         resources: ["*"],
-      })
+      }),
     );
 
     // Application Load Balancer permissions
@@ -94,7 +94,7 @@ export class GitHubOidcStack extends cdk.Stack {
         effect: iam.Effect.ALLOW,
         actions: ["elasticloadbalancing:*"],
         resources: ["*"],
-      })
+      }),
     );
 
     // VPC and EC2 networking permissions
@@ -103,7 +103,7 @@ export class GitHubOidcStack extends cdk.Stack {
         effect: iam.Effect.ALLOW,
         actions: ["ec2:*"],
         resources: ["*"],
-      })
+      }),
     );
 
     // IAM permissions for role and policy management
@@ -112,7 +112,7 @@ export class GitHubOidcStack extends cdk.Stack {
         effect: iam.Effect.ALLOW,
         actions: ["iam:*"],
         resources: ["*"],
-      })
+      }),
     );
 
     // CloudWatch Logs permissions for ECS and Lambda
@@ -121,7 +121,7 @@ export class GitHubOidcStack extends cdk.Stack {
         effect: iam.Effect.ALLOW,
         actions: ["logs:*"],
         resources: ["*"],
-      })
+      }),
     );
 
     // SSM Parameter Store permissions (for configuration)
@@ -130,7 +130,7 @@ export class GitHubOidcStack extends cdk.Stack {
         effect: iam.Effect.ALLOW,
         actions: ["ssm:*"],
         resources: ["*"],
-      })
+      }),
     );
 
     // AWS Certificate Manager permissions (for HTTPS)
@@ -139,7 +139,7 @@ export class GitHubOidcStack extends cdk.Stack {
         effect: iam.Effect.ALLOW,
         actions: ["acm:*"],
         resources: ["*"],
-      })
+      }),
     );
 
     // Route53 permissions (for DNS and certificate validation)
@@ -148,7 +148,7 @@ export class GitHubOidcStack extends cdk.Stack {
         effect: iam.Effect.ALLOW,
         actions: ["route53:*"],
         resources: ["*"],
-      })
+      }),
     );
 
     // STS permissions for CDK Bootstrap and role assumption
@@ -157,7 +157,7 @@ export class GitHubOidcStack extends cdk.Stack {
         effect: iam.Effect.ALLOW,
         actions: ["sts:*"],
         resources: ["*"],
-      })
+      }),
     );
 
     // CodeBuild permissions for building and deploying applications
@@ -166,7 +166,7 @@ export class GitHubOidcStack extends cdk.Stack {
         effect: iam.Effect.ALLOW,
         actions: ["codebuild:*"],
         resources: ["*"],
-      })
+      }),
     );
 
     // CodeDeploy permissions for blue/green deployments
@@ -175,7 +175,16 @@ export class GitHubOidcStack extends cdk.Stack {
         effect: iam.Effect.ALLOW,
         actions: ["codedeploy:*"],
         resources: ["*"],
-      })
+      }),
+    );
+
+    // Pipeline permissions for orchestrating CI/CD workflows
+    githubActionsRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["codepipeline:*"],
+        resources: ["*"],
+      }),
     );
 
     // Output the role ARN for use in GitHub Actions
