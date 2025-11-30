@@ -253,6 +253,7 @@ export class BackendStack extends cdk.Stack {
       pipelineName: "skew-protection-api-pipeline",
       artifactBucket,
       restartExecutionOnUpdate: false, // Don't auto-restart on stack updates
+      executionMode: codepipeline.ExecutionMode.QUEUED,
     });
 
     // Stage 1: Source from S3 (uploaded by GitHub Actions)
