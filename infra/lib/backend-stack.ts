@@ -291,8 +291,8 @@ export class BackendStack extends cdk.Stack {
         new codepipeline_actions.CodeDeployEcsDeployAction({
           actionName: "Deploy_to_ECS",
           deploymentGroup: this.codeDeployDeploymentGroup,
-          taskDefinitionTemplateInput: buildOutput,
-          appSpecTemplateInput: buildOutput,
+          taskDefinitionTemplateFile: buildOutput.atPath("taskdef.json"),
+          appSpecTemplateFile: buildOutput.atPath("appspec.yml"),
         }),
       ],
     });
