@@ -91,7 +91,7 @@ jobs:
   deploy-web:
     needs: [files-changed, deploy-infra]
     uses: ./.github/workflows/deploy-pipeline.yaml
-    if: ${{ always() && needs.files-changed.outputs.web == 'true' && (github.event_name != 'workflow_dispatch' || inputs.deploy-web) }}
+    if: ${{ always() && (needs.files-changed.outputs.web == 'true' || needs.files-changed.outputs.infra == 'true' || (github.event_name == 'workflow_dispatch' && inputs.deploy-web)) }}
     with:
       stack-name: SkewProtectionStack/Frontend
       aws-region: ${{ vars.AWS_REGION }}
@@ -100,7 +100,7 @@ jobs:
   deploy-api:
     needs: [files-changed, deploy-infra]
     uses: ./.github/workflows/deploy-pipeline.yaml
-    if: ${{ always() && needs.files-changed.outputs.api == 'true' && (github.event_name != 'workflow_dispatch' || inputs.deploy-api) }}
+    if: ${{ always() && (needs.files-changed.outputs.api == 'true' || needs.files-changed.outputs.infra == 'true' || (github.event_name == 'workflow_dispatch' && inputs.deploy-api)) }}
     with:
       stack-name: SkewProtectionStack/Backend
       aws-region: ${{ vars.AWS_REGION }}
