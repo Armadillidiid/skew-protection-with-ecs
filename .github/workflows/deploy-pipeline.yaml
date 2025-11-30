@@ -131,31 +131,45 @@ jobs:
           echo "🚀 Starting CodePipeline execution..."
           
           PIPELINE_NAME="${{ steps.get-pipeline.outputs.pipeline-name }}"
+          AWS_REGION="${{ inputs.aws-region }}"
           
           # Start pipeline with custom variables
           EXECUTION_ID=$(aws codepipeline start-pipeline-execution \
             --name "${PIPELINE_NAME}" \
             --client-request-token "${{ github.sha }}-${{ github.run_id }}" \
+            --region "${AWS_REGION}" \
             --query 'pipelineExecutionId' \
             --output text)
           
           echo "execution-id=${EXECUTION_ID}" >> $GITHUB_OUTPUT
           echo "📋 Execution ID: ${EXECUTION_ID}"
-          echo "🔗 View in AWS Console: https://console.aws.amazon.com/codesuite/codepipeline/pipelines/${PIPELINE_NAME}/view"
+          echo "🔗 View in AWS Console: https://${AWS_REGION}.console.aws.amazon.com/codesuite/codepipeline/pipelines/${PIPELINE_NAME}/view"
 
       - name: Wait for pipeline completion
         run: |
           echo "⏳ Waiting for CodePipeline to complete..."
           PIPELINE_NAME="${{ steps.get-pipeline.outputs.pipeline-name }}"
           EXECUTION_ID="${{ steps.start-pipeline.outputs.execution-id }}"
+          AWS_REGION="${{ inputs.aws-region }}"
+          
+          # Add small delay to ensure execution is registered
+          sleep 5
           
           # Poll pipeline status
           while true; do
             PIPELINE_STATUS=$(aws codepipeline get-pipeline-execution \
               --pipeline-name "${PIPELINE_NAME}" \
               --pipeline-execution-id "${EXECUTION_ID}" \
+              --region "${AWS_REGION}" \
               --query 'pipelineExecution.status' \
-              --output text)
+              --output text 2>&1)
+            
+            # Check if command failed
+            if [[ $? -ne 0 ]]; then
+              echo "⚠️  Warning: Could not query pipeline execution (might be registering): ${PIPELINE_STATUS}"
+              sleep 10
+              continue
+            fi
             
             echo "Current pipeline status: ${PIPELINE_STATUS}"
             
@@ -170,6 +184,7 @@ jobs:
               aws codepipeline get-pipeline-execution \
                 --pipeline-name "${PIPELINE_NAME}" \
                 --pipeline-execution-id "${EXECUTION_ID}" \
+                --region "${AWS_REGION}" \
                 --query 'pipelineExecution' \
                 --output json
               exit 1

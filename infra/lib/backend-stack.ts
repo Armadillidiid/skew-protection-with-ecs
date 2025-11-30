@@ -116,7 +116,6 @@ export class BackendStack extends cdk.Stack {
       deploymentController: {
         type: ecs.DeploymentControllerType.CODE_DEPLOY,
       },
-      bakeTime: cdk.Duration.minutes(5),
       minHealthyPercent: 100,
       maxHealthyPercent: 200,
       desiredCount: 1,
